@@ -40,7 +40,18 @@ class SettingsServerTest(unittest.TestCase):
             self.server.stop()
         for n, v in self._saved.items():
             setattr(sn, n, v)
-        self._tmp.cleanup()
+        # stop() does not join the per-connection threads, and one of them can
+        # still be saving into state/ for a moment after it returns -- harmless
+        # in use, but a race with deleting the directory. Seen on a CI runner,
+        # never locally. Retry briefly rather than fail the test on cleanup.
+        for _ in range(40):
+            try:
+                self._tmp.cleanup()
+                break
+            except OSError:
+                time.sleep(0.05)
+        else:
+            self._tmp.cleanup()
 
     def start(self, **kw):
         kw.setdefault("port", 0)
