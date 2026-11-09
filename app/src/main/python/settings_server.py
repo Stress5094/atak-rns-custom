@@ -165,11 +165,16 @@ class Server(object):
                 s.bind(path)
         finally:
             os.umask(old)
+        # Listen as soon as the socket file exists: the file is how the command
+        # line knows a server is running, and between bind() and listen() a
+        # connection is refused -- "No server running" from a server that is.
+        # Seen on a CI runner. Early callers wait in the backlog until the
+        # admin thread below starts accepting.
+        s.listen(4)
+        s.settimeout(1.0)
         if self.web is not None:
             self.web.start()       # before the phones' port too: same reason
         self.net.start()
-        s.listen(4)
-        s.settimeout(1.0)
         self._control = s
         self._running = True
         threading.Thread(target=self._control_loop, name="settings-admin",
