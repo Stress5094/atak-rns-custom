@@ -36,6 +36,13 @@ jobs:
       - name: Install the Python the phone runs
         run: uv python install 3.9
 
+      # The FM modem is codec2's, loaded with ctypes. Without it every modem
+      # test errors or skips, and run_tests.sh fails a run that skips. Ubuntu
+      # 24.04 ships 1.2.0, the version every over-the-air figure was measured
+      # against; -dev provides the unversioned libcodec2.so the loader asks for.
+      - name: Install libcodec2
+        run: sudo apt-get update -q && sudo apt-get install -y -q libcodec2-dev
+
       # .venv at the repo root is where run_tests.sh looks by default. It
       # would build one itself if it were missing, but against the runner's
       # default interpreter; pinning it to 3.9 is the whole point of this job.
@@ -78,6 +85,15 @@ jobs:
         run: |
           curl -LsSf https://astral.sh/uv/install.sh | sh
           uv python install 3.9
+
+      # The phone needs its own arm64 build of codec2, or the APK builds fine
+      # and FM silently cannot start. app/src/main/jniLibs/ is not committed
+      # (a compiled binary tied to one NDK), so build it the way a fresh clone
+      # must: the SDK's own cmake and NDK, then the project's script.
+      - name: Build libcodec2 for the phone
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "cmake;4.1.2" "ndk;28.2.13676358" > /dev/null
+          tools/build_libcodec2_android.sh
 
       - name: Assemble the debug APK
         run: ./gradlew :app:assembleDebug -PbuildPython="$(uv python find 3.9)"

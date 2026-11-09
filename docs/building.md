@@ -27,6 +27,22 @@ SDK — Android Studio writes that file for you on first open, and it is
 deliberately not in the repository, being a path that is true on one machine
 only.
 
+**The FM modem library, libcodec2, isn't committed either**, and a fresh clone
+needs it twice:
+
+- **On the phone:** build the arm64 copy once, before building the APK. It lands
+  in `app/src/main/jniLibs/arm64-v8a/libcodec2.so`. Without it the APK still
+  builds and installs, but FM can't start.
+
+  ```
+  sdkmanager --install "cmake;4.1.2" "ndk;28.2.13676358"
+  tools/build_libcodec2_android.sh
+  ```
+
+- **For the desktop tests:** install codec2 1.2.0 from your distribution
+  (`libcodec2-dev` on Debian/Ubuntu, `codec2` on Arch). The modem tests need it,
+  and `run_tests.sh` fails if they skip.
+
 **Anything left in `app/src/main/python` is shipped to the phone**, because
 that directory is declared as a Chaquopy source set. The desktop test venv
 used to live there, which put 97 MB of desktop-built `cryptography` into every
