@@ -48,7 +48,8 @@ repairs them.
    ```
 
    A fresh clone needs `local.properties` with `sdk.dir` pointing at your
-   Android SDK; Android Studio writes it on first open. Details and traps in
+   Android SDK; Android Studio writes it on first open. For the FM link, also
+   build the modem library once first: `tools/build_libcodec2_android.sh`. Details and traps in
    [building it](docs/building.md).
 
 2. **Connect the radio.** Plug the RNode in and grant the USB prompt, or use
