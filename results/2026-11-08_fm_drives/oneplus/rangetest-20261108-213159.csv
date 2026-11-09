@@ -1,0 +1,20 @@
+time,peer,peer_id,link,seq,rssi_dbm,snr_db,noise_floor_dbm,margin_db,rx_fix_age_s,tx_fix_age_s,distance_m,fix_error_m,usable
+2026-11-09T04:33:32Z,Google Pixel 7,aaaa02,fm,37,,,,,,,,,no
+2026-11-09T04:34:25Z,Google Pixel 7,aaaa02,fm,38,,,,,,,,,no
+2026-11-09T04:34:44Z,Google Pixel 7,aaaa02,fm,39,,,,,10.50,,,,no
+2026-11-09T04:35:03Z,Google Pixel 7,aaaa02,fm,40,,,,,29.90,23.90,23.30,,yes
+2026-11-09T04:35:16Z,Google Pixel 7,aaaa02,fm,41,,,,,42.90,36.90,23.30,,yes
+2026-11-09T04:35:29Z,Google Pixel 7,aaaa02,fm,42,,,,,55.90,18.90,75.20,,yes
+2026-11-09T04:35:57Z,Google Pixel 7,aaaa02,fm,43,,,,,83.30,46.30,75.20,,no
+2026-11-09T04:36:12Z,Google Pixel 7,aaaa02,fm,44,,,,,98.90,5.90,778.00,,no
+2026-11-09T04:36:24Z,Google Pixel 7,aaaa02,fm,45,,,,,110.10,17.10,778.00,,no
+2026-11-09T04:36:29Z,Google Pixel 7,aaaa02,fm,46,,,,,115.30,18.30,845.90,,no
+2026-11-09T04:37:04Z,Google Pixel 7,aaaa02,fm,47,,,,,150.90,53.90,845.90,,no
+2026-11-09T04:40:19Z,Google Pixel 7,aaaa02,fm,57,,,,,165.60,248.50,845.90,3616.60,no
+2026-11-09T04:40:34Z,Google Pixel 7,aaaa02,fm,58,,,,,0.30,263.30,845.90,3831.90,no
+2026-11-09T04:41:20Z,Google Pixel 7,aaaa02,fm,60,,,,,46.30,128.30,1525.50,1211.20,no
+2026-11-09T04:41:40Z,Google Pixel 7,aaaa02,fm,62,,,,,66.90,26.90,543.70,342.10,no
+2026-11-09T04:41:51Z,Google Pixel 7,aaaa02,fm,63,,,,,77.30,8.30,538.80,51.40,yes
+2026-11-09T04:42:24Z,Google Pixel 7,aaaa02,fm,64,,,,,110.10,41.10,538.80,254.10,no
+2026-11-09T04:42:29Z,Google Pixel 7,aaaa02,fm,65,,,,,115.30,7.30,105.60,114.40,no
+2026-11-09T04:42:37Z,Google Pixel 7,aaaa02,fm,66,,,,,123.10,15.10,105.60,236.80,no

@@ -1,0 +1,92 @@
+# Runs on every push and pull request: the desktop test suite first, then a
+# real APK build.
+#
+# The suite is the fast, honest check -- no network, no radio. The build is
+# here because the failure this project is most likely to inflict on someone
+# else is "it does not compile on a machine that is not the author's":
+# every absolute path, every assumption about which Java or Python is lying
+# around, shows up here and nowhere else.
+name: tests
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  desktop-tests:
+    name: Desktop test suite (Python 3.9, as on the phone)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # uv, rather than actions/setup-python, because the version that matters
+      # is the one Chaquopy ships on the phone -- 3.9 -- and uv provides it as
+      # a standalone build regardless of what the runner image happens to
+      # carry. The gap is not academic: datetime.fromisoformat cannot parse
+      # ATAK's timestamps on 3.9 and silently can on 3.11+, so a suite run only
+      # on a modern interpreter passes and the phone still fails. 3.9 is also
+      # the floor for `meshtastic`, which test_mt_port imports for real.
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Install the Python the phone runs
+        run: uv python install 3.9
+
+      # .venv at the repo root is where run_tests.sh looks by default. It
+      # would build one itself if it were missing, but against the runner's
+      # default interpreter; pinning it to 3.9 is the whole point of this job.
+      - name: Build the test venv
+        run: |
+          uv venv --python 3.9 .venv
+          uv pip install --python .venv/bin/python cryptography
+
+      # The script fails the run if any test SKIPS, not merely if one fails: a
+      # missing AEAD backend silently skips all 47 crypto tests and reports
+      # "OK (skipped=47)", which is how this repo went two milestones with its
+      # authentication untested.
+      - name: Run the suite
+        run: app/src/main/python/run_tests.sh
+
+  apk:
+    name: Build the APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The launcher JVM only. gradle/gradle-daemon-jvm.properties asks for a
+      # JetBrains 21 for the daemon itself and Gradle fetches one if the
+      # machine has none, which is exactly the portability this is here to
+      # prove.
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # Chaquopy's build-time pip. app/build.gradle.kts finds one by itself,
+      # but naming it keeps CI building the same way the author's machine does:
+      # matching the on-device version is what lets pip precompile the bundled
+      # Python to .pyc instead of leaving it to the phone's first launch.
+      - name: Install uv and the build-time Python
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          uv python install 3.9
+
+      - name: Assemble the debug APK
+        run: ./gradlew :app:assembleDebug -PbuildPython="$(uv python find 3.9)"
+
+      # Not a release: unsigned debug output, useful for pulling onto a phone
+      # to check a change without building it yourself.
+      - name: Keep the APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
