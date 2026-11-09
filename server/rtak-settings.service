@@ -1,0 +1,31 @@
+# systemd unit for the settings server. See README.md.
+#
+#   sudo useradd --system --home /var/lib/rtak-settings --create-home rtak-settings
+#   sudo cp -r rtak-settings-server /opt/
+#   sudo cp rtak-settings.service /etc/systemd/system/
+#   sudo systemctl enable --now rtak-settings
+#
+# Admin commands then run as that user, against the same state:
+#   sudo -u rtak-settings python3 /opt/rtak-settings-server/settings_server.py \
+#        --state /var/lib/rtak-settings status
+
+[Unit]
+Description=rtak settings server (pushes radio settings to the team's phones)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=rtak-settings
+# Add --lan to also be found by phones on this machine's WiFi, --name to set
+# the name phones show, --web-port 8080 for the admin page (127.0.0.1 only;
+# `settings_server.py --state /var/lib/rtak-settings web-url` gives its address).
+ExecStart=/usr/bin/python3 /opt/rtak-settings-server/settings_server.py --state /var/lib/rtak-settings serve
+Restart=on-failure
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/rtak-settings
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

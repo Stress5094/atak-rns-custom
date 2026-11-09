@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The mesh, drawn on a map: three units linked to each other, the top one
+    transmitting. The nodes are the wide rounded rectangle MIL-STD-2525 uses
+    for a friendly ground unit, the shape an ATAK user reads without being
+    told, and the faint cross-lines are a map graticule.
+
+    Vector rather than exported bitmaps: minSdk is 26, so every release this
+    runs on supports adaptive icons, and there is one file to change instead of
+    five densities to re-export. Nothing is filled, so the monochrome layer
+    still reads when Android 13+ recolours it to the wallpaper.
+
+    (XML comments cannot contain a double hyphen, which is why the prose here
+    is punctuated differently to the rest of the repository.)
+
+    108x108 is the adaptive-icon canvas. Only the middle 72x72 survives the
+    launcher's mask for certain, so every part of the mesh sits inside it; the
+    graticule is allowed to run to the edges, where being cropped is the point.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Map graticule, deliberately faint: context, not content. -->
+    <path
+        android:pathData="M36,0 L36,108 M72,0 L72,108 M0,36 L108,36 M0,72 L108,72"
+        android:strokeColor="#6EE7A8"
+        android:strokeWidth="1.6"
+        android:strokeAlpha="0.18" />
+
+    <!-- Links, stopping short of each unit so the outlines stay closed. -->
+    <path
+        android:pathData="M49.88,45.42 L38.12,66.58 M58.12,45.42 L69.88,66.58 M44.70,74.00 L63.30,74.00"
+        android:strokeColor="#6EE7A8"
+        android:strokeWidth="4.0"
+        android:strokeLineCap="round" />
+
+    <!-- Transmission, over the top unit. -->
+    <path
+        android:pathData="M44.81,30.29 A12,12 0 0 1 63.19,30.29"
+        android:strokeColor="#6EE7A8"
+        android:strokeWidth="4"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M39.66,27.96 A17.5,17.5 0 0 1 68.34,27.96"
+        android:strokeColor="#6EE7A8"
+        android:strokeWidth="4"
+        android:strokeAlpha="0.55"
+        android:strokeLineCap="round" />
+
+    <!-- The three units. -->
+    <path
+        android:pathData="M48.0,32.5 L60.0,32.5 A2.5,2.5 0 0 1 62.5,35.0 L62.5,41.0 A2.5,2.5 0 0 1 60.0,43.5 L48.0,43.5 A2.5,2.5 0 0 1 45.5,41.0 L45.5,35.0 A2.5,2.5 0 0 1 48.0,32.5 Z"
+        android:strokeColor="#6EE7A8"
+        android:strokeWidth="3" />
+    <path
+        android:pathData="M28.0,68.5 L40.0,68.5 A2.5,2.5 0 0 1 42.5,71.0 L42.5,77.0 A2.5,2.5 0 0 1 40.0,79.5 L28.0,79.5 A2.5,2.5 0 0 1 25.5,77.0 L25.5,71.0 A2.5,2.5 0 0 1 28.0,68.5 Z"
+        android:strokeColor="#6EE7A8"
+        android:strokeWidth="3" />
+    <path
+        android:pathData="M68.0,68.5 L80.0,68.5 A2.5,2.5 0 0 1 82.5,71.0 L82.5,77.0 A2.5,2.5 0 0 1 80.0,79.5 L68.0,79.5 A2.5,2.5 0 0 1 65.5,77.0 L65.5,71.0 A2.5,2.5 0 0 1 68.0,68.5 Z"
+        android:strokeColor="#6EE7A8"
+        android:strokeWidth="3" />
+</vector>

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Fill in the vendor-id / product-id for your RNode board's USB-serial
+  chip. Find it with `lsusb` (Linux/Termux) or Windows Device Manager
+  while the RNode is plugged in. Common chips used on RNode-compatible
+  boards:
+
+    CP2102/CP2104 (Silicon Labs) -> vendor-id 4292  (0x10C4)
+    CH340/CH341                  -> vendor-id 6790  (0x1A86)
+    FTDI FT232                   -> vendor-id 1027  (0x0403)
+
+  vendor-id/product-id below MUST be decimal, not hex, in this file.
+  Placeholder values shown are for a common CP2102 board — replace with
+  your actual device's IDs.
+-->
+<resources>
+    <usb-device vendor-id="4292" product-id="60000" />
+
+    <!-- Meshtastic boards used in the LoRa slot, read off `lsusb`:
+         RAK4631 (WisCore)  0x239A / 0x8029  =  9114 / 32809
+         Seeed Tracker L1   0x2886 / 0x1668  = 10374 / 5736
+         Listing a board here is what lets Android offer "always open with this
+         app" in its permission prompt; once ticked, Android grants permission
+         by itself every time the board re-appears. That matters because a
+         board RESTARTS on some settings changes, re-enumerates, and loses the
+         permission with it; measured 2026-10-14, when the board then stayed
+         offline behind a prompt until someone tapped OK. -->
+    <usb-device vendor-id="9114" product-id="32809" />
+    <usb-device vendor-id="10374" product-id="5736" />
+
+    <!-- Digirig Lite: a C-Media CM108-family USB audio codec (0x0D8C /
+         0x0012, decimal 3468 / 18) whose HID interface also drives PTT via
+         a GPIO pin. Used by the FM transport's CM108 keying (Cm108Ptt.kt),
+         never by the RNode/CoT bridge above. The ids here are what
+         Cm108Ptt.VENDOR_ID/PRODUCT_ID scan for, so the two move together.
+         A cable with no HID output report cannot be keyed at any pin and is
+         VOX-only whatever this file says; the K1 PRO is one, which the udev
+         rules in this repo got wrong. -->
+    <usb-device vendor-id="3468" product-id="18" />
+</resources>

@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Material 3 colour scheme, light. A green scheme from Material's tonal
+         palettes (the app's green, #2E7D32, as the seed); every "on" colour
+         pairs with its base at 4.5:1 or better. Dark: values-night. -->
+    <color name="md_primary">#3B6939</color>
+    <color name="md_on_primary">#FFFFFF</color>
+    <color name="md_primary_container">#BCF0B4</color>
+    <color name="md_on_primary_container">#002204</color>
+    <color name="md_secondary">#52634F</color>
+    <color name="md_on_secondary">#FFFFFF</color>
+    <color name="md_secondary_container">#D5E8CF</color>
+    <color name="md_on_secondary_container">#111F0F</color>
+    <color name="md_tertiary">#39656B</color>
+    <color name="md_on_tertiary">#FFFFFF</color>
+    <color name="md_tertiary_container">#BCEBF1</color>
+    <color name="md_on_tertiary_container">#001F23</color>
+    <color name="md_error">#BA1A1A</color>
+    <color name="md_on_error">#FFFFFF</color>
+    <color name="md_error_container">#FFDAD6</color>
+    <color name="md_on_error_container">#410002</color>
+    <color name="md_background">#F7FBF1</color>
+    <color name="md_on_background">#191D17</color>
+    <color name="md_surface">#F7FBF1</color>
+    <color name="md_on_surface">#191D17</color>
+    <color name="md_surface_variant">#DEE5D8</color>
+    <color name="md_on_surface_variant">#424940</color>
+    <color name="md_outline">#72796F</color>
+    <color name="md_outline_variant">#C2C9BD</color>
+    <color name="md_surface_container_lowest">#FFFFFF</color>
+    <color name="md_surface_container_low">#F1F5EC</color>
+    <color name="md_surface_container">#EBEFE6</color>
+    <color name="md_surface_container_high">#E6E9E0</color>
+    <color name="md_surface_container_highest">#E0E4DB</color>
+    <color name="md_inverse_surface">#2D322C</color>
+    <color name="md_inverse_on_surface">#EEF2E9</color>
+    <color name="md_inverse_primary">#A1D39A</color>
+
+    <!-- What the status screens mean by good / caution / bad / idle: a
+         text colour and the tint of its tile. Kept apart from the scheme
+         because they carry meaning (link up, link down), and each pair is
+         checked at 4.5:1 or better in both themes. -->
+    <color name="status_good">#2E6B30</color>
+    <color name="status_good_container">#DDF0DA</color>
+    <color name="status_warn">#8A5300</color>
+    <color name="status_warn_container">#FDEBCF</color>
+    <color name="status_bad">#B3261E</color>
+    <color name="status_bad_container">#FBE4E2</color>
+    <color name="status_idle">#5E655B</color>
+    <color name="status_tile">#ECF0E7</color>
+    <color name="status_heading">#334033</color>
+    <color name="status_highlight">#FFF2A8</color>
+
+    <!-- The drawn views (mesh diagram, coverage map) in light mode. -->
+    <color name="draw_background">#F2F3F4</color>
+    <color name="draw_grid">#DADDE0</color>
+    <color name="draw_street">#FFFFFF</color>
+    <color name="draw_building">#CFD8DC</color>
+    <color name="draw_ink">#37474F</color>
+    <color name="draw_ink_soft">#5F6B70</color>
+    <color name="draw_line">#9E9E9E</color>
+    <color name="draw_node">#FFFFFF</color>
+    <color name="draw_ring">#E0E0E0</color>
+    <!-- Link types, the same hue in both themes, lighter at night. -->
+    <color name="link_rnode">#1565C0</color>
+    <color name="link_meshtastic">#6A1B9A</color>
+    <color name="link_fm">#E65100</color>
+    <color name="link_wifi">#616161</color>
+    <color name="peer_1">#C62828</color>
+    <color name="peer_2">#6A1B9A</color>
+    <color name="peer_3">#EF6C00</color>
+    <color name="peer_4">#4E342E</color>
+    <color name="cov_lora_line">#2E7D32</color>
+    <color name="cov_fm_line">#1565C0</color>
+    <color name="cov_area_line">#7B1FA2</color>
+</resources>

@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" /> <!-- loopback sockets still count -->
+    <!-- The Coverage tab plots range from the phone's own position, so it
+         reads the device location. COARSE is requested alongside FINE so a
+         device that only grants approximate location can still draw a map.
+         Not required for the radio link itself; only for this tab. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Audio capture off a USB sound card, for the FM/audio link. Requested
+         by MainActivity when FM is selected in the radio link dialog, because
+         only an Activity can ask. A refusal leaves FmAudioBridgeService
+         unable to hear anything, which it logs explicitly rather than letting
+         it present as an unplugged cable. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Not enforced at targetSdk 33, where foregroundServiceType is
+         declarative only; declared so the FM link does not lose its capture
+         the day targetSdk moves to 34, which enforces one of these per
+         declared type. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- The WiFi link (802.11s BLOS mesh, via RNS's own stock
+         AutoInterface). CHANGE_WIFI_MULTICAST_STATE is what
+         WifiManager.MulticastLock needs: without it, Android's WiFi radio
+         silently drops the multicast packets AutoInterface's peer discovery
+         depends on. See PythonRnsService.kt. -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Bluetooth, for reaching the RNode without a cable. SCAN is only used
+         by the radio link picker; the bridge service itself needs CONNECT and
+         nothing else, because it connects to a radio a person already chose.
+         neverForLocation because we scan for one specific piece of hardware
+         and derive no position from it. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
+    <!-- Before Android 12 the same two capabilities were spelled like this,
+         and a BLE scan counted as a location capability. Without FINE
+         LOCATION the scan returns nothing at all, with no error. The
+         maxSdkVersion is dropped (was 30) so the same permission also serves
+         the Coverage tab, which needs it at every SDK level. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
+    <!-- Neither wire is required any more: a phone with no USB host support
+         can still run this over Bluetooth, and vice versa. -->
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+
+    <application
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:extractNativeLibs="true"
+        android:theme="@style/Theme.RtakFm">
+
+        <!-- The QR scanner (settings sharing). The library's default locks it
+             to landscape; a phone is held upright to scan another phone. -->
+        <activity
+            android:name="com.journeyapps.barcodescanner.CaptureActivity"
+            android:screenOrientation="fullSensor"
+            tools:replace="screenOrientation" />
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="@string/app_name">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Answers Android's USB_DEVICE_ATTACHED for the radios in
+             device_filter.xml, invisibly, instead of MainActivity: a board
+             that restarts after a settings change re-attaches, and with
+             MainActivity here each restart stacked another copy of the main
+             screen (and would raise it over ATAK). See UsbAttachActivity. -->
+        <activity
+            android:name=".UsbAttachActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar">
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/device_filter" />
+        </activity>
+
+        <!-- RNode USB bridge -->
+        <!-- Its own process, so it outlives the one it kills. Translucent and
+             titleless because it is on screen for a few milliseconds and must
+             not flash a blank window. See RestartActivity. -->
+        <activity
+            android:name=".RestartActivity"
+            android:process=":restart"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <service
+            android:name=".UsbSerialBridgeService"
+            android:foregroundServiceType="connectedDevice"
+            android:exported="false" />
+
+        <!-- The same bridge over Bluetooth. Exactly one of the two runs at a
+             time: they share the loopback port Python connects to. -->
+        <service
+            android:name=".BleSerialBridgeService"
+            android:foregroundServiceType="connectedDevice"
+            android:exported="false" />
+
+        <!-- The FM/codec2 audio link. foregroundServiceType is
+             connectedDevice like its USB/BLE siblings AND microphone, because
+             it holds an AudioRecord off the USB sound card for the life of the
+             link: without the microphone type a foreground service cannot
+             capture at all on recent Android, and the symptom is a recorder
+             that initialises and reads silence, indistinguishable from an
+             unplugged cable on the status screen. Runs CONCURRENTLY with
+             UsbSerialBridgeService/BleSerialBridgeService when FM is enabled
+             as a backup link, which is why it holds its own loopback port. -->
+        <service
+            android:name=".FmAudioBridgeService"
+            android:foregroundServiceType="connectedDevice|microphone"
+            android:exported="false" />
+
+        <!-- ATAK CoT server bridge -->
+        <service
+            android:name=".CotTakServerBridgeService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
+
+    </application>
+</manifest>

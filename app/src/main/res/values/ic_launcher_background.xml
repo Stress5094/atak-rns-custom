@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark enough that the green foreground carries at launcher size, and
+         distinct from ATAK's own icon so the two are not confused on a home
+         screen that has both. -->
+    <color name="ic_launcher_background">#12332B</color>
+</resources>

@@ -1,0 +1,46 @@
+# Digirig Lite (and other C-Media CM108/CM119 sound cards) key PTT by writing
+# a HID report to the chip's GPIO. hidraw nodes are root-only by default, so
+# without this rule the write fails and PTT silently does nothing -- which
+# looks exactly like a wiring fault and is not.
+#
+#   sudo cp tools/99-digirig.rules /etc/udev/rules.d/
+#   sudo cp tools/set-digirig-tx-level.sh /usr/local/bin/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+#
+# Then unplug and replug the cable: udev only applies rules on connect, so an
+# already-attached device keeps the permissions/settings it already had.
+
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0d8c", MODE="0660", GROUP="audio"
+
+# BTECH APRS-K1 PRO: reports as a generic USB audio device under its own
+# vendor ID rather than C-Media's, so find_cm108() will not see it without
+# this line.
+#
+# IT HAS NO GPIO PTT, and this line does not give it one. Settled from the
+# device itself on 2026-10-02: its HID report descriptor (001f:1613, 54
+# bytes) contains Input items only -- consumer-control buttons plus one
+# telephony bit -- and NO Output item, so there is nothing to write a GPIO
+# report to and no --ptt-gpio value can key it. Writing one returns EPIPE.
+# An earlier version of this comment claimed the PRO has "a CM108-style HID
+# GPIO for PTT"; that was wrong, and tools/rx_compare.py had it right all
+# along ("the K1 PRO has none"). This end must be keyed by VOX, which costs
+# a 0.30 s lead-in and a measured 3.2 s hang against the Digirig's ~0.13 s.
+#
+# The rule is KEPT anyway: it is only a permission, the node does exist, and
+# fm_bench_audio.hid_output_report_bytes() is what decides whether a node
+# can actually key -- so a future cable under this vendor that does have an
+# output report works without a udev change.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="001f", MODE="0660", GROUP="audio"
+
+# Re-applies the measured TX playback-level sweet spot (see
+# set-digirig-tx-level.sh's own comment, and docs/open-questions.md, "FOUND
+# IT: the laptop's own TX playback level...", 2026-09-20) every time a
+# C-Media CM108/CM119-class sound card appears, so it survives reboots and
+# cable swaps instead of depending on whatever ALSA's own alsactl
+# store/restore last had it at (which is keyed on card ID/number and can
+# drift if more than one identical dongle is ever plugged in). Matched on
+# the exact vendor+product this was measured against (0d8c:0012, the
+# Digirig Lite's own C-Media chip) rather than vendor alone -- unlike the
+# hidraw rule above, this SETS a value rather than just granting
+# permission, so it deliberately does not fire on an untested product ID.
+KERNEL=="controlC[0-9]*", SUBSYSTEM=="sound", ATTRS{idVendor}=="0d8c", ATTRS{idProduct}=="0012", RUN+="/usr/local/bin/set-digirig-tx-level.sh %k"

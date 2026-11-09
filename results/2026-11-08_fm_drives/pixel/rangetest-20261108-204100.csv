@@ -1,0 +1,12 @@
+time,peer,peer_id,link,seq,rssi_dbm,snr_db,noise_floor_dbm,margin_db,rx_fix_age_s,tx_fix_age_s,distance_m,fix_error_m,usable
+2026-11-09T03:41:20Z,OnePlus KB2007,aaaa01,fm,21,,,,,,,,,no
+2026-11-09T03:41:28Z,OnePlus KB2007,aaaa01,fm,22,,,,,,,,,no
+2026-11-09T03:41:39Z,OnePlus KB2007,aaaa01,fm,23,,,,,,,,,no
+2026-11-09T03:42:05Z,OnePlus KB2007,aaaa01,fm,24,,,,,,,,,no
+2026-11-09T03:42:30Z,OnePlus KB2007,aaaa01,fm,25,,,,,,,,,no
+2026-11-09T03:42:46Z,OnePlus KB2007,aaaa01,fm,26,,,,,,23.80,,,no
+2026-11-09T03:43:50Z,OnePlus KB2007,aaaa01,fm,27,,,,,20.70,87.70,3.30,,no
+2026-11-09T03:44:04Z,OnePlus KB2007,aaaa01,fm,28,,,,,34.50,101.50,3.30,,no
+2026-11-09T03:45:16Z,OnePlus KB2007,aaaa01,fm,30,,,,,37.30,173.30,22.00,,no
+2026-11-09T03:45:38Z,OnePlus KB2007,aaaa01,fm,32,,,,,16.10,195.10,20.40,,no
+2026-11-09T03:46:51Z,OnePlus KB2007,aaaa01,fm,33,,,,,1.40,88.40,530.50,12.90,yes
