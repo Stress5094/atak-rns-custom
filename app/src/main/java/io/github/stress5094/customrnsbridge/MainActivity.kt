@@ -504,10 +504,12 @@ class MainActivity : AppCompatActivity() {
                 com.google.android.material.navigation.NavigationBarView.LABEL_VISIBILITY_LABELED
             // Item ids are page indices; Network (id 2) opens whichever of
             // Mesh (2) or Coverage (3) it showed last.
+            // Advanced last, far right (operator, 2026-11-10): it is the tab
+            // least often needed. Share, when shown, sits before it.
             listOf(Triple(0, "Status", R.drawable.ic_nav_status),
-                   Triple(1, "Advanced", R.drawable.ic_nav_debug),
                    Triple(2, "Network", R.drawable.ic_nav_mesh),
-                   Triple(4, "Share", R.drawable.ic_nav_share)).forEachIndexed { order, (id, label, icon) ->
+                   Triple(4, "Share", R.drawable.ic_nav_share),
+                   Triple(1, "Advanced", R.drawable.ic_nav_debug)).forEachIndexed { order, (id, label, icon) ->
                 menu.add(android.view.Menu.NONE, id, order, label).setIcon(icon)
             }
             menu.findItem(4).isVisible = RadioLink.shareTabEnabled(this@MainActivity)
