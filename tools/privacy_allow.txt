@@ -1,9 +1,0 @@
-# Values tools/privacy_check.sh flagged, reviewed by hand and judged NOT
-# personal. One fixed string per line, matched against the hit text
-# (file:line:value). Add only after looking at the value in context.
-#
-# Test fixtures: made-up MACs and coordinates.
-test_mt_config.py:497:24:6F:28:AB:CD:12
-test_mt_config.py:500:24:6F:28:AB:CE:01
-test_rangetest.py:26:35.001000, -79.000000
-test_tx_policy.py:695:37.00000,-122.00000

@@ -1,6 +1,0 @@
-=== Pixel 7  baseline at window start
-  status(fm): online=True txb=885 rxb=811 duty=0.0% | tx_queue=0 | peers: On UP (6s ago, 5/18 lost) | beacon sizes heard: [10, 34]
-  mesh: wrapped=25 unwrapped=13 duplicate=3 unauthenticated=0 foreign=0 epoch=110
-=== KB2007  baseline at window start
-  status(fm): online=True txb=876 rxb=986 duty=0.0% | tx_queue=0 | peers: Go UP (123s ago, 7/18 lost) | beacon sizes heard: [10, 43]
-  mesh: wrapped=18 unwrapped=11 duplicate=9 unauthenticated=0 foreign=0 epoch=101
