@@ -57,19 +57,48 @@ class BluetoothSetup(
     private var bondReceiver: BroadcastReceiver? = null
     private var pinReceiver: BroadcastReceiver? = null
 
+    private var title = "Switch to Bluetooth"
+
     fun start() {
+        showProgress()
+        say("Turning on the radio's Bluetooth…")
+        executor.execute { radioSteps() }
+    }
+
+    /**
+     * The manual path: the operator picked [device] from the list. If this
+     * phone's radio is on the cable, it is put into pairing mode first, so the
+     * code arrives over the cable and is filled in; with no cable, the
+     * operator puts the radio into pairing mode by its own button and reads
+     * the code off its screen. Either way: pair, then [onDone].
+     */
+    @SuppressLint("MissingPermission")
+    fun pairPicked(device: BluetoothDevice, name: String, overCable: Boolean) {
+        title = "Pair with $name"
+        showProgress()
+        if (!overCable) {
+            bond(device, name, "")
+            return
+        }
+        say("Putting the radio into pairing mode…")
+        executor.execute {
+            PythonRnsService.call("enable_rnode_bluetooth", "pair")
+            val pin = PythonRnsService.call("get_bt_pairing_pin").orEmpty()
+            handler.post { if (!cancelled) bond(device, name, pin) }
+        }
+    }
+
+    private fun showProgress() {
         status = TextView(activity).apply {
             textSize = 15f
             setPadding(dp(24), dp(12), dp(24), dp(4))
         }
         dialog = MaterialAlertDialogBuilder(activity)
-            .setTitle("Switch to Bluetooth")
+            .setTitle(title)
             .setView(status)
             .setNegativeButton("Cancel") { _, _ -> cancel() }
             .setCancelable(false)
             .show()
-        say("Turning on the radio's Bluetooth…")
-        executor.execute { radioSteps() }
     }
 
     private fun say(text: String) = handler.post { if (::status.isInitialized) status.text = text }
@@ -165,8 +194,9 @@ class BluetoothSetup(
                 when (intent.getIntExtra(BluetoothDevice.EXTRA_BOND_STATE, -1)) {
                     BluetoothDevice.BOND_BONDED -> finish(device, name)
                     BluetoothDevice.BOND_NONE -> fail("Pairing with $name did not complete. " +
-                        "The radio stays in pairing mode for about a minute: try again, " +
-                        "or check the code.")
+                        "The radio must be in pairing mode: on the cable the app does " +
+                        "that, otherwise hold the radio's button for 5 seconds. It " +
+                        "stays in pairing mode for about a minute. Then try again.")
                 }
             }
         }
@@ -249,7 +279,7 @@ class BluetoothSetup(
         cleanup()
         dialog?.dismiss()
         MaterialAlertDialogBuilder(activity)
-            .setTitle("Switch to Bluetooth")
+            .setTitle(title)
             .setMessage(message)
             .setPositiveButton("OK", null)
             .show()

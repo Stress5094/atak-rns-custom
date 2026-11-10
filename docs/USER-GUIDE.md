@@ -82,11 +82,17 @@ Everything here lives under **Status → Radio link**.
   the code is shown to type in by hand. The radio stays in pairing mode for
   about a minute.
 
-  The manual controls are still there for other cases (no cable, or two
-  radios side by side): **Bluetooth**, **Scan for radios**, tap the radio,
-  and **Turn on** / **Pairing mode** under *On the radio itself*. Bluetooth
-  radios don't appear in Android's own Bluetooth settings, which is why the
-  scan is inside the app. Over Bluetooth the radio needs its own battery.
+  **Pairing by hand** (no cable, or two radios side by side): tap
+  **Bluetooth**, **Scan for radios**, then tap the radio and **Pair**.
+  - If that radio is on this phone's cable, the app puts it into pairing
+    mode and fills in the code, as above.
+  - Otherwise, first hold the radio's button for 5 seconds to put it into
+    pairing mode, and type the code from its screen when Android asks.
+  - Then tap **Save** and restart.
+
+  Bluetooth radios don't appear in Android's own Bluetooth settings, which is
+  why the scan is inside the app. Over Bluetooth the radio needs its own
+  battery.
 - **The board runs Meshtastic firmware (not RNode):** tick this for a
   Meshtastic board. The *LoRa settings* button on the Status tab then opens the
   [Meshtastic board](#meshtastic-board) dialog instead of the RNode one.
@@ -121,7 +127,6 @@ values.
 - **Radio screen…:** puts this node on the RNode's small screen: node id,
   radio name, phone name, and who it can hear. Off by default. The same
   button gives the screen back to the radio.
-- **Pairing mode** and **Turn on** (Bluetooth), as above.
 
 The **Radio link** button always names the link actually in use, and says
 `(restart to apply)` while a saved change hasn't taken effect yet.
