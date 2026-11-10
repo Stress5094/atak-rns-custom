@@ -748,6 +748,36 @@ def recent_tx(window_s):
         return None
 
 
+# ---------------------------------------------------------------------------
+# Station ID (fm_callsign): the callsign as audible Morse, sent with NO network
+# key and NO modem, so any listener can read it. Kotlin's audio service asks
+# for it on its own timer and plays it like a burst (LBT, PTT, key-up wait).
+# ---------------------------------------------------------------------------
+
+# Steady tone ahead of the Morse when the radio is keyed by VOX: the radio
+# switches on 0.3-0.7 s after audio starts (see fm_config.VOX_CABLE_LEAD_IN_S's
+# notes), and a second covers that with margin without costing much airtime.
+CALLSIGN_VOX_LEAD_S = 1.0
+
+
+def callsign_id_pcm(callsign):
+    """Mono PCM16LE of `callsign` in Morse at the link's sample rate, or None
+    when the callsign is blank or not valid (fm_callsign.normalize)."""
+    import fm_callsign
+    call = fm_callsign.normalize(callsign)
+    if call is None:
+        return None
+    cfg = config()
+    lead = CALLSIGN_VOX_LEAD_S if cfg.keying == fm_config.KEYING_VOX else 0.0
+    return fm_callsign.pcm16(call, cfg.profile.sample_rate_hz, lead_s=lead)
+
+
+def callsign_valid(callsign):
+    """For the settings field: True when `callsign` would be sent."""
+    import fm_callsign
+    return fm_callsign.normalize(callsign) is not None
+
+
 def note_tx_state(native_lib_dir, active):
     """Kotlin reports that this node started or stopped transmitting.
 

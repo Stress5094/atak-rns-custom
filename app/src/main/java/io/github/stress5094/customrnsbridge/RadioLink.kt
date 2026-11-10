@@ -100,6 +100,9 @@ object RadioLink {
     private const val KEY_FM_VOX_CABLE = "fm_vox_cable"
     private const val KEY_FM_TX_OFF = "fm_tx_off"
     private const val KEY_FM_TX_GAIN = "fm_tx_gain"
+    private const val KEY_FM_CALLSIGN = "fm_callsign"
+    private const val KEY_FM_CLEAR = "fm_clear"
+    private const val KEY_FM_CALLSIGN_INTERVAL_MIN = "fm_callsign_interval_min"
     // The operator's own settings (fm_custom JSON), used when the profile is
     // PROFILE_CUSTOM. Kept even while a preset is selected, so switching to a
     // preset and back does not lose them.
@@ -291,6 +294,47 @@ object RadioLink {
 
     fun setFmTxOff(context: Context, off: Boolean) {
         prefs(context).edit().putBoolean(KEY_FM_TX_OFF, off).apply()
+    }
+
+    /** STATION ID: the operator's callsign, sent on FM as audible Morse every
+     * fmCallsignIntervalMin() minutes while the FM link is open. Sent in the
+     * CLEAR -- no network key, no data modem -- so anyone listening can tell
+     * who is transmitting (see fm_callsign.py). Blank (the default) sends
+     * nothing. Read by the audio service per check, so no restart needed. */
+    fun fmCallsign(context: Context): String =
+        prefs(context).getString(KEY_FM_CALLSIGN, "")?.trim()?.uppercase() ?: ""
+
+    fun setFmCallsign(context: Context, callsign: String) {
+        prefs(context).edit().putString(KEY_FM_CALLSIGN, callsign.trim().uppercase()).apply()
+    }
+
+    /** SEND FM UNENCRYPTED: every frame this node transmits on FM goes out
+     * without the network key (rns_bridge._fm_clear / mesh.Mesh.to_clear), so
+     * anyone with the open-source decoder can read it -- what US amateur rules
+     * require. LoRa and WiFi stay encrypted. Also makes this node accept clear
+     * frames, so every node on the FM net needs the same setting. Off by
+     * default; needs a bridge restart. */
+    fun fmClear(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_FM_CLEAR, false)
+
+    fun setFmClear(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_FM_CLEAR, enabled).apply()
+    }
+
+    /** Minutes between station IDs. Default 10, the US amateur (Part 97)
+     * interval; GMRS is 15. Clamped so a typo can neither flood the channel
+     * nor go silent for days. */
+    const val CALLSIGN_INTERVAL_DEFAULT_MIN = 10
+    const val CALLSIGN_INTERVAL_MIN_MIN = 1
+    const val CALLSIGN_INTERVAL_MAX_MIN = 120
+
+    fun fmCallsignIntervalMin(context: Context): Int =
+        prefs(context).getInt(KEY_FM_CALLSIGN_INTERVAL_MIN, CALLSIGN_INTERVAL_DEFAULT_MIN)
+            .coerceIn(CALLSIGN_INTERVAL_MIN_MIN, CALLSIGN_INTERVAL_MAX_MIN)
+
+    fun setFmCallsignIntervalMin(context: Context, minutes: Int) {
+        prefs(context).edit().putInt(KEY_FM_CALLSIGN_INTERVAL_MIN,
+            minutes.coerceIn(CALLSIGN_INTERVAL_MIN_MIN, CALLSIGN_INTERVAL_MAX_MIN)).apply()
     }
 
     /** DIAGNOSTIC ONLY, no dialog entry: the AudioTrack gain for FM bursts,

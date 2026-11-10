@@ -57,6 +57,10 @@ class RadioLinkDialog(
 ) {
 
     companion object {
+        // Mirrors fm_callsign.normalize(): 3-12 of A-Z 0-9 /, at least one
+        // letter and one digit. Python re-checks before anything is sent.
+        private val CALLSIGN_RE = Regex("^(?=.*[0-9])(?=.*[A-Z])[A-Z0-9/]{3,12}$")
+
         private const val TAG = "RadioLinkDialog"
         private const val SCAN_MS = 10_000L
 
@@ -129,6 +133,15 @@ class RadioLinkDialog(
     // of the `changed` comparison on purpose.
     private var txOff = RadioLink.fmTxOff(activity)
 
+    // Station ID: callsign sent as clear Morse on FM every N minutes. Shown
+    // whenever FM is in use, advanced or not -- an operator who must identify
+    // should not have to find a hidden switch. Like txOff, read live by the
+    // audio service, so it needs no restart and stays out of `changed`.
+    private lateinit var callsignSection: View
+    private lateinit var callsignField: EditText
+    private lateinit var callsignIntervalField: EditText
+    private var fmClear = RadioLink.fmClear(activity)
+
     // The WiFi link (802.11s BLOS mesh) -- independent of transport/FM backup
     // entirely, so it lives outside the RadioGroup below rather than as a
     // fourth option in it. See RadioLink.wifiEnabled()'s own comment.
@@ -189,8 +202,8 @@ class RadioLinkDialog(
                 }
             })
             body.addView(TextView(activity).apply {
-                text = "Turns on the radio's Bluetooth, pairs it with this phone and " +
-                    "switches over. Keep the radio on the cable until the bridge has restarted."
+                text = "Pairs the radio by Bluetooth and switches over. Keep the " +
+                    "cable in until the bridge restarts."
                 textSize = 12f
                 setTextColor(COLOR_IDLE)
                 setPadding(0, dp(2), 0, dp(10))
@@ -253,6 +266,7 @@ class RadioLinkDialog(
             fmBackupCheckbox.visibility = if (fmOnly) View.GONE else View.VISIBLE
             toneProfileSection.visibility =
                 if (fmInUse() && advanced) View.VISIBLE else View.GONE
+            callsignSection.visibility = if (fmInUse()) View.VISIBLE else View.GONE
         }
         radioGroup.setOnCheckedChangeListener { _, checked ->
             when (checked) {
@@ -298,6 +312,7 @@ class RadioLinkDialog(
                 // traffic, so it reveals the tone picker too.
                 toneProfileSection.visibility =
                     if (fmInUse() && advanced) View.VISIBLE else View.GONE
+                callsignSection.visibility = if (fmInUse()) View.VISIBLE else View.GONE
             }
         }
         body.addView(fmBackupCheckbox)
@@ -306,6 +321,11 @@ class RadioLinkDialog(
             visibility = if (fmInUse() && advanced) View.VISIBLE else View.GONE
         }
         body.addView(toneProfileSection)
+
+        callsignSection = buildCallsignSection().apply {
+            visibility = if (fmInUse()) View.VISIBLE else View.GONE
+        }
+        body.addView(callsignSection)
 
         // Not a fourth RadioButton above: WiFi is not another way of reaching
         // the LoRa radio, it is its own separate link that runs alongside
@@ -395,10 +415,7 @@ class RadioLinkDialog(
             textSize = 12f
         })
         box.addView(TextView(activity).apply {
-            text = "Every node on the FM net must use the same settings: " +
-                "compare the net code on the status screen before splitting " +
-                "up. A different rate, tone count or code is total silence, " +
-                "and the link cannot report it."
+            text = "All FM phones must match (check the net code on Status)."
             textSize = 12f
         })
 
@@ -454,9 +471,7 @@ class RadioLinkDialog(
                 setOnCheckedChangeListener { _, checked -> voxCable = checked }
             })
             addView(TextView(activity).apply {
-                text = "Leave OFF for a Digirig Lite. ON sends a longer lead-in " +
-                    "tone (about 1 s) so the radio's VOX has switched on before " +
-                    "the data starts; bursts run about 0.9 s longer."
+                text = "Off for a Digirig Lite. On adds ~1 s lead-in for VOX."
                 textSize = 12f
             })
         }
@@ -469,12 +484,65 @@ class RadioLinkDialog(
             setOnCheckedChangeListener { _, checked -> txOff = checked }
         })
         if (advanced) box.addView(TextView(activity).apply {
-            text = "For measuring this link from another radio. ON stops EVERY " +
-                "burst from this phone -- beacons, messages, position resends " +
-                "-- so nobody can hear it and it will drop off other nodes' " +
-                "lists. A half-duplex radio hears nothing while it transmits, " +
-                "so this removes that as a cause of lost bursts. Takes effect " +
-                "at once. Turn it OFF when the test is done."
+            text = "Stops ALL FM sending from this phone. Turn off after testing."
+            textSize = 12f
+        })
+        return box
+    }
+
+    private fun buildCallsignSection(): View {
+        val box = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(10), 0, 0)
+        }
+        box.addView(TextView(activity).apply {
+            text = "FM station ID"
+            textSize = 12f
+        })
+        box.addView(com.google.android.material.checkbox.MaterialCheckBox(activity).apply {
+            text = "Send FM unencrypted"
+            isChecked = fmClear
+            setOnCheckedChangeListener { _, checked -> fmClear = checked }
+        })
+        box.addView(TextView(activity).apply {
+            text = "For ham use. LoRa stays encrypted. All FM phones must match."
+            textSize = 12f
+        })
+        callsignField = EditText(activity).apply {
+            hint = "Callsign (blank = off)"
+            textSize = 12f
+            isSingleLine = true
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS or
+                android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            setText(RadioLink.fmCallsign(activity))
+        }
+        callsignIntervalField = EditText(activity).apply {
+            hint = "10"
+            textSize = 12f
+            isSingleLine = true
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+            setText(RadioLink.fmCallsignIntervalMin(activity).toString())
+        }
+        // Callsign and interval on one row: "[callsign      ] every [10] min".
+        box.addView(LinearLayout(activity).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            addView(callsignField, LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(TextView(activity).apply {
+                text = " every "
+                textSize = 12f
+            })
+            addView(callsignIntervalField, LinearLayout.LayoutParams(
+                dp(48), LinearLayout.LayoutParams.WRAP_CONTENT))
+            addView(TextView(activity).apply {
+                text = " min"
+                textSize = 12f
+            })
+        })
+        box.addView(TextView(activity).apply {
+            text = "Sent as Morse tone, in the clear (~5 s)."
             textSize = 12f
         })
         return box
@@ -985,6 +1053,7 @@ class RadioLinkDialog(
                 (wifiEnabled && newWifiIfname != RadioLink.wifiIfname(activity)) ||
                 (fmInUse() && toneProfile != RadioLink.fmToneProfile(activity)) ||
                 (fmInUse() && voxCable != RadioLink.fmVoxCable(activity)) ||
+                (fmInUse() && fmClear != RadioLink.fmClear(activity)) ||
                 (fmInUse() && toneProfile == RadioLink.PROFILE_CUSTOM &&
                         customSpec != RadioLink.fmCustomSpec(activity))
 
@@ -992,6 +1061,27 @@ class RadioLinkDialog(
             Toast.makeText(
                 activity,
                 "Set up the custom FM settings first, or pick a preset",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+
+        val callsign = callsignField.text.toString().trim().uppercase()
+        if (callsign.isNotEmpty() && !CALLSIGN_RE.matches(callsign)) {
+            Toast.makeText(
+                activity,
+                "Callsign must be 3-12 letters/digits (and /), with at least one digit",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+        val idMinutes = callsignIntervalField.text.toString().trim().toIntOrNull()
+        if (idMinutes == null || idMinutes < RadioLink.CALLSIGN_INTERVAL_MIN_MIN ||
+            idMinutes > RadioLink.CALLSIGN_INTERVAL_MAX_MIN) {
+            Toast.makeText(
+                activity,
+                "Station ID interval must be ${RadioLink.CALLSIGN_INTERVAL_MIN_MIN}-" +
+                    "${RadioLink.CALLSIGN_INTERVAL_MAX_MIN} minutes",
                 Toast.LENGTH_LONG
             ).show()
             return
@@ -1031,6 +1121,9 @@ class RadioLinkDialog(
         RadioLink.setFmVoxCable(activity, voxCable)
         RadioLink.setFmCustomSpec(activity, customSpec)
         RadioLink.setFmTxOff(activity, txOff)
+        RadioLink.setFmCallsign(activity, callsign)
+        RadioLink.setFmClear(activity, fmClear)
+        RadioLink.setFmCallsignIntervalMin(activity, idMinutes)
         dialog?.dismiss()
         // Changing the wire under a running bridge means two services fighting
         // over one loopback port and RNS talking to a radio that is no longer

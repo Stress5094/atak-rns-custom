@@ -104,7 +104,10 @@ class SettingsShareUi(
                 .put("fm", JSONObject()
                     .put("profile", RadioLink.fmToneProfile(c))
                     .put("custom_spec", RadioLink.fmCustomSpec(c))
-                    .put("vox", RadioLink.fmVoxCable(c)))
+                    .put("vox", RadioLink.fmVoxCable(c))
+                    // "Send FM unencrypted": shared with the FM group, since a
+                    // phone with it off ignores what a phone with it on sends.
+                    .put("clear", RadioLink.fmClear(c)))
                 .toString()
 
         /** Save the FM settings a result hands back, if any. Python has
@@ -114,6 +117,7 @@ class SettingsShareUi(
             val fm = result.optJSONObject("fm") ?: return
             RadioLink.setFmToneProfile(c, fm.optString("profile", RadioLink.fmToneProfile(c)))
             if (fm.has("custom_spec")) RadioLink.setFmCustomSpec(c, fm.optString("custom_spec"))
+            if (fm.has("clear")) RadioLink.setFmClear(c, fm.optBoolean("clear"))
             RadioLink.markFmActive(c)
             Log.i(TAG, "FM settings from a share saved: ${fm.optString("profile")}")
         }
@@ -209,13 +213,14 @@ class SettingsShareUi(
      *  preset's name, or the custom settings' net code. */
     private fun fmCheckbox() = com.google.android.material.checkbox.MaterialCheckBox(activity).apply {
         val profile = RadioLink.fmToneProfile(activity)
-        text = if (profile == RadioLink.PROFILE_CUSTOM) "FM settings: Custom (net code)"
-               else "FM settings: ${profile.replaceFirstChar { it.uppercase() }} preset"
+        val tones = if (profile == RadioLink.PROFILE_CUSTOM) "FM settings: Custom (net code)"
+                    else "FM settings: ${profile.replaceFirstChar { it.uppercase() }} preset"
+        text = tones + if (RadioLink.fmClear(activity)) ", sent unencrypted" else ", encrypted"
     }
 
     private fun fmNote() = text("FM sends only what every radio must share (tones, rate, " +
-        "code); each phone keeps its own keying and lead-in. Phones switch FM without " +
-        "restarting.", 12f, Ui.onSurfaceVariant(activity))
+        "code, and whether FM is sent unencrypted); each phone keeps its own keying and " +
+        "lead-in. Phones switch FM without restarting.", 12f, Ui.onSurfaceVariant(activity))
 
     private fun toast(msg: String) = Toast.makeText(activity, msg, Toast.LENGTH_LONG).show()
 

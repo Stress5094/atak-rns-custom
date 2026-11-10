@@ -442,6 +442,13 @@ _radio_firmware = RADIO_RNODE
 # ignored) when _transport is already "fm": there is no LoRa there to back up.
 _fm_backup_enabled = False
 
+# "Send FM unencrypted" (RadioLink.fmClear): every frame this node puts on the
+# FM link goes out as a T_CLEAR frame -- the network key is NOT applied -- so
+# anyone with the (open-source) decoder can read it, as US amateur rules
+# require. LoRa and WiFi are unaffected. Also makes this node ACCEPT clear
+# frames, since its FM peers will be sending them. Set by Kotlin before start().
+_fm_clear = False
+
 # Whether start() should also bring up the WiFi interface -- same "handed in by
 # Kotlin at startup, before start()" convention as _fm_backup_enabled above,
 # via set_wifi_enabled(). Independent of _transport and _fm_backup_enabled
@@ -1397,8 +1404,10 @@ def _build_mesh(passphrase):
             "Nonce uniqueness across restarts is no longer guaranteed",
             RNS.LOG_WARNING,
         )
-    return mesh.Mesh(_NODE_ID, mesh.derive_key(passphrase), epoch=epoch,
-                     on_epoch_change=mesh.save_epoch)
+    m = mesh.Mesh(_NODE_ID, mesh.derive_key(passphrase), epoch=epoch,
+                  on_epoch_change=mesh.save_epoch)
+    m.accept_clear = _fm_clear
+    return m
 
 
 def _save_passphrase(passphrase):
@@ -3107,6 +3116,17 @@ def _transmit_sealed(sealed, link=None):
     target = link or _active_link
     if target == LINK_FM:
         send = getattr(_fm_iface, "process_outgoing", None)
+        if _fm_clear:
+            # Stripped of the network key at the last moment, so every FM
+            # sender -- beacons, CoT, resends, relays, LoRa-failed escalations
+            # -- is covered by this one line, and LoRa keeps the sealed copy.
+            active = _mesh
+            clear = active.to_clear(sealed) if active is not None else None
+            if clear is None:
+                RNS.log("[cot-bridge] FM clear mode: frame did not decrypt under "
+                        "this key; not sending it", RNS.LOG_WARNING)
+                return False
+            sealed = clear
         return bool(send and send(sealed))
     if target == LINK_LORA and _radio_firmware == RADIO_MESHTASTIC:
         # Same bypass as FM, same reason: the board is a single broadcast
@@ -6627,6 +6647,18 @@ def set_fm_backup_enabled(enabled):
     global _fm_backup_enabled
     _fm_backup_enabled = bool(enabled)
     return _fm_backup_enabled
+
+
+def set_fm_clear(enabled):
+    """RadioLink.fmClear(): send FM unencrypted (and accept clear frames).
+    Kotlin entry point, called at startup before start(); takes effect on a
+    running mesh too."""
+    global _fm_clear
+    _fm_clear = bool(enabled)
+    active = _mesh
+    if active is not None:
+        active.accept_clear = _fm_clear
+    return _fm_clear
 
 
 def set_fm_profile(name, vox=False, custom_spec=""):

@@ -78,14 +78,16 @@ PREFIX = "RTAKS1."
 # a host sending a key this phone does not know is a version mismatch, and
 # applying half of it would leave a phone on settings nobody chose.
 SETTING_KEYS = ("lora_preset", "lora_freq_mhz", "lora_tx_dbm", "fm_profile",
-                "fm_custom", "coverage", "passphrase")
+                "fm_custom", "fm_clear", "coverage", "passphrase")
 COVERAGE_KEYS = ("fm_mhz", "fm_w", "tx_height_m")
 # Settings that, changed on some phones and not others, split the network.
 NETWORK_KEYS = ("lora_preset", "lora_freq_mhz", "fm_profile", "fm_custom",
-                "passphrase")
+                "fm_clear", "passphrase")
 # fm_custom is the NET CODE of a custom FM setting (fm_custom.net_code), sent
 # beside fm_profile = "custom". Only what every node must share travels;
 # keying, lead-in, filter and copies are each phone's own and stay put.
+# fm_clear (bool) is "send FM unencrypted": a network key in the same sense,
+# because a phone with it off ignores the clear frames a phone with it on sends.
 
 ROUTE_QR = "qr"
 ROUTE_NETWORK = "network"
@@ -308,6 +310,8 @@ def verify(text):
     for k in ("fm_profile", "fm_custom"):
         if k in settings and not isinstance(settings[k], str):
             raise Refused("The bundle's FM settings are not understood")
+    if "fm_clear" in settings and not isinstance(settings["fm_clear"], bool):
+        raise Refused("The bundle's FM settings are not understood")
     if "fm_custom" in settings and settings.get("fm_profile") != "custom":
         # A net code with nothing selecting it would be applied to nothing.
         raise Refused("The bundle's FM settings are not understood")
@@ -333,6 +337,7 @@ def _flatten(settings):
 LABELS = {"lora_preset": "LoRa preset", "lora_freq_mhz": "LoRa frequency (MHz)",
           "lora_tx_dbm": "LoRa power (dBm)", "fm_profile": "FM tone profile",
           "fm_custom": "FM custom net code",
+          "fm_clear": "FM sent unencrypted",
           "coverage.fm_mhz": "Coverage: FM frequency (MHz)",
           "coverage.fm_w": "Coverage: FM power (W)",
           "coverage.tx_height_m": "Coverage: antenna height (m)",
