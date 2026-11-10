@@ -314,7 +314,7 @@ object RadioLink {
         prefs(context).edit().putString(KEY_LINK_OVERRIDE, link).apply()
     }
 
-    /** The Debug tab's "Advanced features" switch. Off by default, it only
+    /** The Advanced tab's "Advanced features" switch. Off by default, it only
      * HIDES controls: the link override buttons, and in the Radio link dialog
      * the WiFi mesh, custom FM settings, the no-PTT-pin cable and receive-only
      * test mode. Settings already made keep their values while hidden; the
@@ -328,7 +328,7 @@ object RadioLink {
         prefs(context).edit().putBoolean(KEY_ADVANCED, on).apply()
     }
 
-    /** Debug → Advanced features → "Show detailed status". Off by default:
+    /** Advanced → Advanced features → "Show detailed status". Off by default:
      * the Status tab then leaves out its informational lines (build stamp,
      * FM net code and operating point, receive summary, re-send counts) and
      * keeps only the warnings. */
@@ -341,7 +341,7 @@ object RadioLink {
         prefs(context).edit().putBoolean(KEY_STATUS_DETAILS, on).apply()
     }
 
-    /** Debug → Advanced features → "Show the Share tab". Off by default:
+    /** Advanced → Advanced features → "Show the Share tab". Off by default:
      * the bottom bar then has four tabs. Share QR / Scan QR stay on Status. */
     private const val KEY_SHARE_TAB = "share_tab"
 

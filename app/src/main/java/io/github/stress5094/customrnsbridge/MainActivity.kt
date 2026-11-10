@@ -506,7 +506,7 @@ class MainActivity : AppCompatActivity() {
             // Item ids are page indices; Network (id 2) opens whichever of
             // Mesh (2) or Coverage (3) it showed last.
             listOf(Triple(0, "Status", R.drawable.ic_nav_status),
-                   Triple(1, "Debug", R.drawable.ic_nav_debug),
+                   Triple(1, "Advanced", R.drawable.ic_nav_debug),
                    Triple(2, "Network", R.drawable.ic_nav_mesh),
                    Triple(4, "Share", R.drawable.ic_nav_share)).forEachIndexed { order, (id, label, icon) ->
                 menu.add(android.view.Menu.NONE, id, order, label).setIcon(icon)
@@ -1621,7 +1621,7 @@ class MainActivity : AppCompatActivity() {
     /**
      * Status tab: settings, log control and the restart -- everything you
      * reach for while the node is doing its job, as opposed to the bench
-     * tools on the Debug tab that exist to set up or troubleshoot the
+     * tools on the Advanced tab that exist to set up or troubleshoot the
      * hardware underneath it.
      *
      * Even columns rather than right-aligned rows because a full-width tap
@@ -1689,7 +1689,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     /**
-     * Debug tab (was "Radio test"): every bench-only button that exists to set up or
+     * Advanced tab (was "Debug", before that "Radio test"): every bench-only button that exists to set up or
      * troubleshoot the hardware, not to run the mesh -- grouped by what
      * each group actually verifies, with a one-line caption per group
      * rather than a single undifferentiated column of eleven buttons.
@@ -1927,7 +1927,7 @@ class MainActivity : AppCompatActivity() {
         else -> "LoRa"
     }
 
-    /** The Debug tab's force buttons: "*" marks the one chosen. They do
+    /** The Advanced tab's force buttons: "*" marks the one chosen. They do
      * nothing useful until two links are built, so they say so then. */
     private fun renderOverrideButtons(override: String, twoLinks: Boolean) {
         if (overrideButtons.isEmpty()) return
@@ -2777,7 +2777,7 @@ class MainActivity : AppCompatActivity() {
         // look perfectly healthy, and the build stamp catches the case before
         // that one: only one phone got the new APK.
         // Informational lines (build stamp, FM net code and operating point,
-        // receive summary, re-send counts) only with Debug → Advanced
+        // receive summary, re-send counts) only with Advanced → Advanced
         // features → Show detailed status. Warnings always show.
         val details = RadioLink.statusDetails(this)
         val protocol = status.optInt("protocol", 0)
@@ -2900,7 +2900,7 @@ class MainActivity : AppCompatActivity() {
                     "FM TEST MODE: this node is NOT transmitting. It hears " +
                         "traffic but sends no beacons, messages or resends, so " +
                         "other nodes will lose it. Turn it off in Radio link " +
-                        "(Debug tab → Show advanced features) when the test is done.",
+                        "(Advanced tab → Show advanced features) when the test is done.",
                     COLOR_WARN))
             }
             FmAudioBridgeService.keylessReason?.let {
@@ -2969,7 +2969,7 @@ class MainActivity : AppCompatActivity() {
         // Which links exist and which one is carrying traffic, as a row of
         // buttons: the active link filled, a link standing by as backup
         // outlined, one that is not set up dimmed. Tapping any opens Radio
-        // link. The force buttons moved to the Debug tab (Advanced features),
+        // link. The force buttons moved to the Advanced tab (Advanced features),
         // so a forced link is spelled out here: it is the one setting that
         // can strand a node on a dead link with nothing else looking wrong.
         // The "link" block from get_status() exists only once two links are
@@ -3014,7 +3014,7 @@ class MainActivity : AppCompatActivity() {
         localBox.addView(chips)
         if (linkBlock != null && override != "auto") {
             localBox.addView(line(
-                "Link forced to " + linkName(override) + ": automatic failover is off. Debug tab → Advanced " +
+                "Link forced to " + linkName(override) + ": automatic failover is off. Advanced tab → Advanced " +
                     "features → Auto turns it back on.",
                 COLOR_WARN))
         }
