@@ -703,7 +703,7 @@ high is the likely cause; that is inferred, not proven.
 **First guesses, not measurements**
 
 - the 30 s failback delay
-- the Mesh tab's grading thresholds
+- the Mesh sub-tab's grading thresholds
 - the FM back-off
 
 The beacon interval is temporarily 60 s; the intended value is 90 s.
