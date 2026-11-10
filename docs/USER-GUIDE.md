@@ -83,7 +83,7 @@ Everything here lives under **Status → Radio link**.
   why the scan is inside the app. Over Bluetooth the radio needs its own
   battery.
 - **The board runs Meshtastic firmware (not RNode):** tick this for a
-  Meshtastic board. The *Radio* button on the Status tab then opens the
+  Meshtastic board. The *LoRa settings* button on the Status tab then opens the
   [Meshtastic board](#meshtastic-board) dialog instead of the RNode one.
 - **FM audio (USB):** use a Digirig and an FM handheld. See the FM options
   below.
@@ -92,21 +92,25 @@ Everything here lives under **Status → Radio link**.
 
 - **Use FM as automatic backup:** builds the FM link next to LoRa. FM then
   takes over if LoRa fails (see [section 8](#8-routing-which-radio-carries-what)).
-- **Use a WiFi mesh as an additional link:** adds Wi-Fi as the last-resort
-  link.
-- **FM tone placement:**
-  - *fast* (the default), *narrow* or *wide*.
-  - *Custom*: your own tones, rate and keying, set in
-    [Custom FM settings](#custom-fm-settings) via **Edit custom settings…**.
-  - Every radio on a net must use the same placement.
-- **Cable has no PTT pin (K1 PRO / VOX radio):** keys the radio with its
-  voice-operated switch instead of the PTT line.
-- **Test mode: receive only, do not transmit:** for listening without keying
-  the radio.
+- **FM tone placement:** *fast* (the default), *narrow* or *wide*. Every
+  radio on a net must use the same placement.
 - **Which radio:** when more than one radio is paired, choose which one this
   phone uses. With two paired and none chosen, the app waits rather than
   guessing.
 
+**Advanced options.** These only appear after you turn on *Debug → Show
+advanced features*. Turning the switch off hides them again but keeps their
+values.
+
+- **Use a WiFi mesh as an additional link:** adds Wi-Fi as the last-resort
+  link.
+- **Custom** tone placement: your own tones, rate and keying, set in
+  [Custom FM settings](#custom-fm-settings) via **Edit custom settings…**.
+  If Custom is already in use, it stays visible with the switch off.
+- **Cable has no PTT pin (K1 PRO / VOX radio):** keys the radio with its
+  voice-operated switch instead of the PTT line.
+- **Test mode: receive only, do not transmit:** for listening without keying
+  the radio. While it is on, the Status tab shows a warning.
 **On the radio itself** (needs a working link):
 
 - **Identify:** flashes the light on the radio this phone is connected to.
@@ -159,11 +163,13 @@ The tab you use day to day.
   | *Garbled* | signal arrives but won't decode | adjust the volume knob as the level readout says |
   | *Silent* | no audio at all | check the radio |
   | *No audio* | the app's audio path itself is broken | restart the bridge |
-- **Active link and override:**
-  - Shows which link is carrying traffic: *LoRa*, *FM (backup)* or *WiFi*.
-  - **Auto** lets the app choose.
-  - **Force LoRa / Force FM / Force WiFi** pins one link. Health is still
-    measured underneath, so going back to *Auto* resumes cleanly.
+- **Link buttons:** one button per link.
+  - *active* (filled): the link carrying traffic now.
+  - *backup* (outlined): set up and listening, ready to take over.
+  - *off* (dimmed): not set up.
+  - The WiFi button only appears when Wi-Fi is on or advanced features are on.
+  - Tap any of them to open **Radio link**.
+  - If a link has been forced from the Debug tab, a warning line says so.
 - **Tiles:**
   - **Airtime:** this node's share of the channel. A warning shows above 30%.
   - **Channel:** how busy the channel is.
@@ -175,7 +181,7 @@ The tab you use day to day.
   actually crossed the air in the last three beacon intervals.
 - **Buttons:**
   - [Passphrase](#passphrase)
-  - [Radio](#radio-rnode)
+  - [LoRa settings](#lora-settings-rnode)
   - [Radio link](#3-connecting-the-radio)
   - **Share QR / Scan QR** ([section 11](#11-sharing-settings-with-a-team))
   - **Restart bridge**
@@ -184,6 +190,13 @@ The tab you use day to day.
 ### Debug
 
 Bench and field-test tools.
+
+- **Advanced features:** **Show advanced features** reveals:
+  - **Link:** **Auto** lets the app choose. **Force LoRa / Force FM / Force
+    WiFi** pins one link after you confirm. Health is still measured
+    underneath, so going back to *Auto* resumes cleanly. A `*` marks the
+    current choice. The buttons are greyed out while only one link is set up.
+  - the advanced options in [Radio link](#3-connecting-the-radio).
 
 - **Log:**
   - **Start log / Stop log** records the app's log to a file. The phone's own
@@ -251,7 +264,7 @@ passphrase.
 - There is **no default**. A phone with no passphrase makes up its own and
   stays alone, rather than joining a network anyone could read.
 
-### Radio (RNode)
+### LoRa settings (RNode)
 
 - **Preset:** eight presets, named as in Meshtastic. Every node must use the
   same one.
@@ -288,7 +301,7 @@ across the whole mesh.
 
 ### Meshtastic board
 
-Opened from *Status → Radio* when the radio link is set to Meshtastic.
+Opened from *Status → LoRa settings* when the radio link is set to Meshtastic.
 
 - **Use the app's settings:** the recommended choice. It puts the board on the
   app's preset, frequency and power, derives the channel name and key from
@@ -426,7 +439,7 @@ if you turned it on and its hardware is attached.
      unhealthy, because moving to a slower radio wouldn't help.
    - **FM** has no acknowledgements, so it counts as healthy whenever it is
      connected.
-5. **Manual override** (*Force LoRa / FM / WiFi* on the Status tab) beats all
+5. **Manual override** (*Force LoRa / FM / WiFi* under *Debug → Advanced features*) beats all
    of the above until you choose *Auto* again.
 6. **Per-message choices for one-shot messages:**
    - A message for a peer this phone has only ever heard on FM goes straight
@@ -638,7 +651,7 @@ changes at once and nobody is left on the old settings
 | FM *Garbled* | Receive volume wrong. Follow the level readout. Too high is as bad as too low. |
 | FM *Silent* | Radio off, squelch closed, or cable unplugged. |
 | A message under *Messages* / *Undelivered* | It got no acknowledgement after every retry. Resend, or move closer. |
-| High *Airtime* | Too many nodes or too slow a preset. See the preset table in [section 6](#radio-rnode). |
+| High *Airtime* | Too many nodes or too slow a preset. See the preset table in [section 6](#lora-settings-rnode). |
 
 For a field problem, use *Debug → Start log*, reproduce the problem, then
 *Export*.

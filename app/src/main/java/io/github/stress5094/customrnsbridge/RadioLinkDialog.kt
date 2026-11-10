@@ -116,6 +116,12 @@ class RadioLinkDialog(
     // saved with the rest of this dialog. "" until first set up.
     private var customSpec = RadioLink.fmCustomSpec(activity)
     private lateinit var customLabel: TextView
+    private lateinit var customEditButton: View
+
+    // The Debug tab's "Advanced features" switch: off hides the WiFi mesh,
+    // custom FM, no-PTT cable and test mode below. Hidden settings keep their
+    // values -- this only decides what is shown.
+    private val advanced = RadioLink.advancedEnabled(activity)
 
     // Test mode: receive only. Read per burst by the audio service, so unlike
     // the settings around it this one does NOT need a restart and is left out
@@ -267,6 +273,7 @@ class RadioLinkDialog(
         val wifiCheckbox = com.google.android.material.checkbox.MaterialCheckBox(activity).apply {
             text = "Use a WiFi mesh as an additional link"
             isChecked = wifiEnabled
+            visibility = if (advanced) View.VISIBLE else View.GONE
             setOnCheckedChangeListener { _, checked ->
                 wifiEnabled = checked
                 wifiIfnameField.visibility = if (checked) View.VISIBLE else View.GONE
@@ -278,7 +285,7 @@ class RadioLinkDialog(
             hint = "Mesh interface name, e.g. wlan0 -- blank uses every interface"
             textSize = 12f
             setText(wifiIfname)
-            visibility = if (wifiEnabled) View.VISIBLE else View.GONE
+            visibility = if (advanced && wifiEnabled) View.VISIBLE else View.GONE
         }
         body.addView(wifiIfnameField)
 
@@ -364,6 +371,10 @@ class RadioLinkDialog(
                 else RadioLink.toneProfileLabel(name)
                 textSize = 12f
                 isChecked = name == toneProfile
+                // Custom is advanced -- but stays listed while it is the one
+                // in use, so a hidden setting is never the selected one.
+                if (name == RadioLink.PROFILE_CUSTOM && !advanced &&
+                    toneProfile != RadioLink.PROFILE_CUSTOM) visibility = View.GONE
                 group.addView(this)
             }
         }
@@ -384,9 +395,10 @@ class RadioLinkDialog(
             setPadding(dp(32), 0, 0, 0)
         }
         box.addView(customLabel)
-        box.addView(Ui.outlined(activity, "Edit custom settings\u2026").apply {
+        customEditButton = Ui.outlined(activity, "Edit custom settings\u2026").apply {
             setOnClickListener { openCustomEditor() }
-        })
+        }
+        box.addView(customEditButton)
 
         // Custom settings carry their own keying (chosen in the editor), so
         // this checkbox applies to the presets only and hides for Custom.
@@ -407,12 +419,12 @@ class RadioLinkDialog(
         box.addView(voxSection)
         showCustomState()
 
-        box.addView(com.google.android.material.checkbox.MaterialCheckBox(activity).apply {
+        if (advanced) box.addView(com.google.android.material.checkbox.MaterialCheckBox(activity).apply {
             text = "Test mode: receive only, do not transmit"
             isChecked = txOff
             setOnCheckedChangeListener { _, checked -> txOff = checked }
         })
-        box.addView(TextView(activity).apply {
+        if (advanced) box.addView(TextView(activity).apply {
             text = "For measuring this link from another radio. ON stops EVERY " +
                 "burst from this phone -- beacons, messages, position resends " +
                 "-- so nobody can hear it and it will drop off other nodes' " +
@@ -428,7 +440,10 @@ class RadioLinkDialog(
      * whether the VOX checkbox applies. */
     private fun showCustomState() {
         val custom = toneProfile == RadioLink.PROFILE_CUSTOM
-        voxSection.visibility = if (custom) View.GONE else View.VISIBLE
+        voxSection.visibility = if (custom || !advanced) View.GONE else View.VISIBLE
+        val showCustom = advanced || custom
+        customLabel.visibility = if (showCustom) View.VISIBLE else View.GONE
+        customEditButton.visibility = if (showCustom) View.VISIBLE else View.GONE
         customLabel.text = when {
             customSpec.isBlank() -> "Custom: not set up yet"
             else -> "Custom: " + customNetCode()

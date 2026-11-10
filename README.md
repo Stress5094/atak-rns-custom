@@ -52,7 +52,7 @@ boards.
    no default. Check that the four-character **Network key** fingerprint on the
    Status tab matches on every phone.
 
-4. **Set the same radio settings on every phone:** *Status → Radio*. The default
+4. **Set the same radio settings on every phone:** *Status → LoRa settings*. The default
    preset is Short Slow. Or set one phone up and share it: *Status → Share QR*
    on that phone, *Scan QR* on the others.
 

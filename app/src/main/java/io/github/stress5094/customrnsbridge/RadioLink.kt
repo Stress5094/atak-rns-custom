@@ -314,6 +314,20 @@ object RadioLink {
         prefs(context).edit().putString(KEY_LINK_OVERRIDE, link).apply()
     }
 
+    /** The Debug tab's "Advanced features" switch. Off by default, it only
+     * HIDES controls: the link override buttons, and in the Radio link dialog
+     * the WiFi mesh, custom FM settings, the no-PTT-pin cable and receive-only
+     * test mode. Settings already made keep their values while hidden; the
+     * Status tab still warns about a forced link or receive-only mode. */
+    private const val KEY_ADVANCED = "advanced_features"
+
+    fun advancedEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_ADVANCED, false)
+
+    fun setAdvancedEnabled(context: Context, on: Boolean) {
+        prefs(context).edit().putBoolean(KEY_ADVANCED, on).apply()
+    }
+
     /** Bluetooth address of the chosen radio, or null to use the only paired one. */
     fun bleAddress(context: Context): String? =
         prefs(context).getString(KEY_BLE_ADDRESS, null)

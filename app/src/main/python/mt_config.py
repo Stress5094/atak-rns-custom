@@ -315,7 +315,7 @@ def profile_problems(request):
                 "Bluetooth PIN is derived from it"]
     if request.get("region") == "UNSET":
         return ["The board has no region and the app's frequency (%.3f MHz) is "
-                "not in a band this app knows -- set the region under Radio"
+                "not in a band this app knows -- set the region under LoRa settings"
                 % request["override_frequency_mhz"]]
     return []
 
@@ -445,7 +445,7 @@ def warnings(snap):
                    "repeats other boards' own Meshtastic traffic (their positions "
                    "and node info), which costs airtime. The app's own packets go "
                    "out with a hop limit of 0 and have not been seen repeated. "
-                   "'Never repeat' under Radio stops the rest."
+                   "'Never repeat' under LoRa settings stops the rest."
                    % REBROADCAST_CHOICES.get(snap.get("rebroadcast"),
                                              snap.get("rebroadcast")))
     if snap.get("role") in REPEATER_ROLES:
@@ -459,12 +459,12 @@ def warnings(snap):
         out.append("The board's own GPS is on, so it broadcasts its own position "
                    "every 15-50 s whenever the app is connected, and other boards "
                    "repeat it -- airtime the app's own positions do not need. "
-                   "'Use the app's settings' under Radio turns it off.")
+                   "'Use the app's settings' under LoRa settings turns it off.")
     bt = snap.get("bluetooth") or {}
     if bt.get("enabled") and bt.get("mode") == "NO_PIN":
         out.append("The board's Bluetooth needs no PIN: anyone in range can "
                    "connect to it and read the channel key. 'Use the app's "
-                   "settings' under Radio gives it the PIN from the passphrase.")
+                   "settings' under LoRa settings gives it the PIN from the passphrase.")
     return out
 
 
