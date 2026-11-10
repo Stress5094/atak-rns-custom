@@ -21,9 +21,9 @@ WHAT THIS LAYER ADDS, AND WHAT IT COSTS
 
     [ctrl 1][origin 3][epoch 1][seq 2][hops 1]  header, sent in clear
     [ ciphertext, same length as the plaintext frame            ]
-    [ tag 8                                                     ]
+    [ tag 4                                                     ]
 
-16 bytes on a 61-byte position report. The header is deliberately readable --
+12 bytes on a 61-byte position report. The header is deliberately readable --
 duplicate suppression has to work before anything is decrypted, or a relay
 would have to trial-decrypt everything it hears -- but all of it except `hops`
 is covered by the authentication tag, so `origin` and `seq` cannot be altered.
@@ -42,7 +42,8 @@ that are already there and already authenticated:
 
     nonce = origin(3) || epoch(1) || seq(2) || six zero bytes
 
-That is what keeps the crypto overhead at 8 bytes rather than 20. It also
+That is what keeps the crypto overhead at 4 bytes (plus the 8-byte header)
+rather than 16 (plus the header). It also
 means nonce uniqueness is exactly the question "can one node ever reuse an
 (epoch, seq) pair", which is why the sequencing below is written the way it is
 and should be changed with care: reusing a nonce under CCM leaks the XOR of
@@ -50,17 +51,33 @@ two plaintexts and opens the door to forgery. It is the one bug in this file
 that would be genuinely dangerous.
 
 Sequence numbers are monotonic within a process. Across restarts they would
-start again from zero, so `epoch` is persisted and incremented at every start
--- one small file write per process, not per frame -- and a wrap of `seq` bumps
-it too. See `Mesh.next_frame_id`.
+start again from zero, so a COUNTER is persisted and incremented at every
+start -- one small file write per process, not per frame -- and a wrap of `seq`
+bumps it too. See `Mesh.next_frame_id`.
+
+THE EPOCH BYTE IS ONLY 8 BITS OF A LONGER COUNTER. The wire carries
+`counter & 0xFF`, but the counter itself is a full integer that is never
+masked, stored in the epoch file together with the fingerprint of the key it
+was spent under. Under one key it can be spent 256 times (every process start,
+every re-key back to the same key's file, every 16-bit seq wrap); after that
+the next bump would repeat a nonce. So at 256 the Mesh refuses to transmit
+(`wrap()` raises MeshError) until the passphrase is changed, which gives a new
+key and therefore a fresh nonce space. Receiving is unaffected. The same stop
+applies when the counter cannot be written to disk: there is no random-epoch
+fallback any more, because a 1-in-256 instant collision is not a trade worth
+making in this file. A LOST counter file under an UNCHANGED key restarts the
+counter at 0 and so could reuse low counters; that case is flagged
+(`counter_reset`) and the caller is expected to change the node id, but the
+airtight answer is always to re-key.
 
 WHY AES-CCM WITH A TRUNCATED TAG
 
 Not RNS's own Token: it spends 48 bytes (a 16-byte IV and a full 32-byte HMAC)
 plus PKCS7 padding, which is 79% overhead on a position report. Not AES-GCM
 either, because pyca will not truncate a GCM tag and 16 bytes is more than this
-channel can spare. CCM with an 8-byte tag is what 802.15.4 and LoRaWAN use for
-the same reason, and pyca exposes the tag length directly.
+channel can spare. CCM with a short tag is what 802.15.4 and LoRaWAN use for
+the same reason, and pyca exposes the tag length directly (4 bytes here, see
+TAG_LEN).
 
 TRUST MODEL, STATED PLAINLY
 
@@ -90,6 +107,7 @@ libpython3.8.so). Keep this module 3.8-compatible -- no match statements, no
 
 import collections
 import hashlib
+import json
 import os
 import struct
 import threading
@@ -246,43 +264,106 @@ def node_id_hex(raw):
     return raw.hex()
 
 
-def load_epoch(path=_EPOCH_PATH):
-    """Read the persisted counter generation, increment it, and write it back.
+# The wire epoch is one byte, so a key has 256 counter values to spend.
+EPOCH_SPACE = 256
 
-    Called once per process. Sequence numbers restart at zero on every launch,
-    so without this a restarted node would reuse (epoch, seq) pairs it had
-    already used -- which is nonce reuse, and the one failure in this module
-    with real consequences.
+# Why a Mesh will not transmit. None means it will.
+EXHAUSTED_SPACE = "space"      # the counter reached EPOCH_SPACE under this key
+EXHAUSTED_PERSIST = "persist"  # the counter could not be written to disk
 
-    If the file cannot be written, falls back to a random epoch rather than
-    refusing to start. That trades a 1-in-256 chance of colliding with a
-    previously used generation for the app being able to run at all, which is
-    the right way round for a device whose storage may be full or read-only --
-    but it is a real weakening, so it is logged by the caller rather than
-    passed over in silence. Returns (epoch, persisted).
+MSG_SPACE = "nonce space exhausted \u2014 change the passphrase"
+MSG_PERSIST = "cannot persist the transmit counter"
+STATUS_SPACE = ("TRANSMIT STOPPED: counter space used up \u2014 "
+                "set a NEW passphrase on every phone")
+STATUS_PERSIST = ("TRANSMIT STOPPED: cannot persist the transmit counter "
+                  "\u2014 free storage space or set a NEW passphrase")
+STATUS_COUNTER_RESET = ("COUNTER FILE WAS LOST \u2014 change the passphrase soon")
+
+
+EpochClaim = collections.namedtuple("EpochClaim", "counter exhausted counter_reset")
+
+
+def _read_epoch_file(path):
+    """-> (fp, counter, lost). `lost` is True when nothing usable is there.
+
+    Two formats: the current JSON {"fp": ..., "counter": ...}, and the bare
+    integer older builds wrote, read as an unfingerprinted counter that the
+    next save adopts under the current key.
     """
-    epoch = 0
     try:
         with open(path) as f:
-            epoch = (int(f.read().strip()) + 1) & 0xFF
-    except (OSError, ValueError):
-        epoch = 0
-    if save_epoch(epoch, path):
-        return epoch, True
-    return struct.unpack("B", os.urandom(1))[0], False
-
-
-def save_epoch(epoch, path=_EPOCH_PATH):
-    """Record the generation now in use, so the next start comes after it.
-
-    Also called when a sequence wrap bumps the epoch mid-run -- that bump has
-    the same meaning as a restart and has to survive one. Returns whether it
-    stuck; best-effort by design, since refusing to transmit because a counter
-    file will not write would be a worse failure than the one it prevents.
-    """
+            text = f.read().strip()
+    except OSError:
+        return None, 0, True
     try:
-        with open(path, "w") as f:
-            f.write(str(epoch & 0xFF))
+        data = json.loads(text)
+    except ValueError:
+        return None, 0, True
+    if isinstance(data, bool):
+        return None, 0, True
+    if isinstance(data, int):
+        return (None, data, False) if data >= 0 else (None, 0, True)
+    if isinstance(data, dict):
+        counter = data.get("counter")
+        fp = data.get("fp")
+        if (isinstance(counter, int) and not isinstance(counter, bool)
+                and counter >= 0 and (fp is None or isinstance(fp, str))):
+            return fp, counter, False
+    return None, 0, True
+
+
+def load_epoch(path=_EPOCH_PATH, fp=None):
+    """Claim the next transmit counter under key fingerprint `fp`.
+
+    Called once per process and once per re-key. Sequence numbers restart at
+    zero on every launch, so without this a restarted node would reuse
+    (epoch, seq) pairs it had already used -- nonce reuse, the one failure in
+    this module with real consequences.
+
+    * Same key as the stored fingerprint (or a legacy bare-int file, which has
+      none): stored counter + 1.
+    * Different key: 0. A new key is a fresh nonce space.
+    * File missing or corrupt: 0, with `counter_reset` set. Under an unchanged
+      key this could reuse low counters, which is why it is reported rather
+      than hidden; the airtight fix is changing the passphrase.
+    * Counter would reach EPOCH_SPACE: `exhausted` = EXHAUSTED_SPACE and
+      nothing is written. The Mesh will refuse to transmit.
+    * Counter cannot be saved: `exhausted` = EXHAUSTED_PERSIST. There is no
+      random fallback.
+    """
+    stored_fp, stored, lost = _read_epoch_file(path)
+    counter_reset = lost
+    if lost:
+        counter = 0
+    elif stored_fp is not None and fp is not None and stored_fp != fp:
+        counter = 0
+    else:
+        counter = stored + 1
+    if counter >= EPOCH_SPACE:
+        return EpochClaim(counter, EXHAUSTED_SPACE, counter_reset)
+    if not save_epoch(counter, fp, path):
+        return EpochClaim(counter, EXHAUSTED_PERSIST, counter_reset)
+    return EpochClaim(counter, None, counter_reset)
+
+
+def save_epoch(counter, fp=None, path=_EPOCH_PATH):
+    """Record the counter now in use, with the key it belongs to, so the next
+    start comes after it. Also called when a sequence wrap bumps the counter
+    mid-run -- that bump has the same meaning as a restart and has to survive
+    one. Returns whether it stuck; a False is treated by the Mesh as grounds
+    to stop transmitting. Written to a temporary file and renamed, so a crash
+    mid-write cannot leave a corrupt file (which would read as a lost one).
+    """
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w") as f:
+            f.write(json.dumps({"fp": fp, "counter": int(counter)}))
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except OSError:
+                pass
+        os.replace(tmp, path)
         return True
     except OSError:
         return False
@@ -366,7 +447,8 @@ class Mesh(object):
     """
 
     def __init__(self, node_id, key, epoch=0, on_epoch_change=None,
-                 seen=None, clock=time.monotonic):
+                 seen=None, clock=time.monotonic, exhausted=None,
+                 counter_reset=False):
         if not HAVE_AEAD:
             raise MeshError(
                 "no AEAD backend: the cryptography package is required "
@@ -375,7 +457,14 @@ class Mesh(object):
             raise MeshError("key must be %d bytes, got %d" % (KEY_BYTES, len(key)))
         self.origin = node_id_bytes(node_id)
         self._aead = AESCCM(key, tag_length=TAG_LEN)
-        self._epoch = epoch & 0xFF
+        # The full, never-masked counter; the wire carries counter & 0xFF.
+        self._counter = int(epoch)
+        self._exhausted = exhausted
+        if self._exhausted is None and self._counter >= EPOCH_SPACE:
+            self._exhausted = EXHAUSTED_SPACE
+        # A lost counter file under an unchanged key, reported once.
+        self.counter_reset = bool(counter_reset)
+        self._counter_reset_reported = False
         self._seq = 0
         self._on_epoch_change = on_epoch_change
         self._seq_lock = threading.Lock()
@@ -399,29 +488,53 @@ class Mesh(object):
 
     # -- outbound -----------------------------------------------------------
 
+    @property
+    def _epoch(self):
+        """The byte that goes on the wire."""
+        return self._counter & 0xFF
+
+    def tx_stopped(self):
+        """The status line explaining why this Mesh will not transmit, or None."""
+        if self._exhausted == EXHAUSTED_SPACE:
+            return STATUS_SPACE
+        if self._exhausted == EXHAUSTED_PERSIST:
+            return STATUS_PERSIST
+        return None
+
     def next_frame_id(self):
         """Allocate the (epoch, seq) that makes this frame's nonce unique.
 
-        Wrapping `seq` bumps `epoch`, which is the same thing a restart does,
-        so the persisted value stays ahead of anything already used. At one
-        frame a minute a wrap is about 45 days away; it is handled anyway
+        Wrapping `seq` bumps the counter, which is the same thing a restart
+        does, so the persisted value stays ahead of anything already used. At
+        one frame a minute a wrap is about 45 days away; it is handled anyway
         because the alternative is silent nonce reuse.
+
+        Raises MeshError once the counter space is used up or the counter could
+        not be persisted: transmitting from here would risk repeating a nonce.
         """
         with self._seq_lock:
-            # The epoch is snapshotted BEFORE any bump: this frame belongs to
+            if self._exhausted == EXHAUSTED_SPACE:
+                raise MeshError(MSG_SPACE)
+            if self._exhausted == EXHAUSTED_PERSIST:
+                raise MeshError(MSG_PERSIST)
+            # The counter is snapshotted BEFORE any bump: this frame belongs to
             # the generation it was allocated under, and the wrap takes effect
             # for the next one. Returning the incremented value instead would
             # spend the new generation's last sequence number before its first.
-            epoch, seq = self._epoch, self._seq
+            counter, seq = self._counter, self._seq
             self._seq = (seq + 1) & 0xFFFF
             if self._seq == 0:
-                self._epoch = (epoch + 1) & 0xFF
-                if self._on_epoch_change is not None:
+                self._counter = counter + 1
+                if self._counter >= EPOCH_SPACE:
+                    self._exhausted = EXHAUSTED_SPACE
+                elif self._on_epoch_change is not None:
                     try:
-                        self._on_epoch_change(self._epoch)
+                        stuck = self._on_epoch_change(self._counter)
                     except Exception:
-                        pass  # persistence is best-effort; the bump still stands
-            return epoch, seq
+                        stuck = False
+                    if stuck is False:
+                        self._exhausted = EXHAUSTED_PERSIST
+            return counter & 0xFF, seq
 
     def wrap(self, frame, hops=DEFAULT_HOPS):
         """One complete inner frame -> one mesh frame ready for the radio.
@@ -590,7 +703,13 @@ class Mesh(object):
         out = dict(self._stats)
         out["seen"] = len(self.seen)
         out["epoch"] = self._epoch
+        out["counter"] = self._counter
         out["seq"] = self._seq
+        stopped = self.tx_stopped()
+        if stopped:
+            out["tx_stopped"] = stopped
+        if self.counter_reset and not self._counter_reset_reported:
+            out["counter_reset"] = True
         out["since_accept"] = self._since_accept
         out["version"] = cot_codec.PROTOCOL_VERSION
         if self._peer_version is not None:
@@ -618,6 +737,12 @@ class Mesh(object):
         elif self._since_accept >= MISMATCH_THRESHOLD:
             line += (" -- NOTHING HAS DECRYPTED IN %d FRAMES, CHECK THE PASSPHRASE"
                      % self._since_accept)
+        stopped = self.tx_stopped()
+        if stopped:
+            line += " -- " + stopped
+        if self.counter_reset and not self._counter_reset_reported:
+            self._counter_reset_reported = True
+            line += " -- " + STATUS_COUNTER_RESET
         return line
 
 

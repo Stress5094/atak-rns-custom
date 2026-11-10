@@ -1150,7 +1150,14 @@ def set_session_info(build_stamp):
     return _build_stamp
 
 
-def _load_node_id():
+# True when _load_node_id() had to invent the id (no file), as opposed to
+# reading one back. A lost transmit-counter file on a phone that is NOT fresh is
+# the dangerous case (see _build_mesh); on a fresh install it is just first run.
+_node_id_fresh = False
+_node_id_regenerated = False
+
+
+def _load_node_id(regenerate=False):
     """Identifies this device in beacons.
 
     Persisted rather than generated per process. A random-per-run id made the
@@ -1158,15 +1165,28 @@ def _load_node_id():
     the old one lingered as a ghost -- which is exactly what was observed on
     the bench after a reinstall. Random rather than derived from a device
     serial: it needs to be stable and distinguishable, not identifying.
+
+    `regenerate` throws the stored id away and makes a new one. Used when the
+    transmit counter file was lost while this file survived: peers keep a
+    replay window per origin and would reject the restarted counter as
+    "older", so the node has to come back as a new origin.
     """
+    global _node_id_fresh
+    previous = None
     try:
         with open(_NODE_ID_PATH) as f:
             existing = f.read().strip()
         if existing:
-            return existing
+            previous = existing
+            if not regenerate:
+                _node_id_fresh = False
+                return existing
     except OSError:
         pass
+    _node_id_fresh = previous is None
     node_id = os.urandom(3).hex()
+    while node_id == previous:
+        node_id = os.urandom(3).hex()
     try:
         with open(_NODE_ID_PATH, "w") as f:
             f.write(node_id)
@@ -1176,6 +1196,7 @@ def _load_node_id():
 
 
 _NODE_ID = _load_node_id()
+_NODE_ID_WAS_FRESH = _node_id_fresh
 
 
 # ---------------------------------------------------------------------------
@@ -1393,19 +1414,44 @@ def _key_fingerprint():
 def _build_mesh(passphrase):
     """A Mesh on a freshly advanced counter generation.
 
-    Always a NEW epoch, never a reused one: re-keying resets the sequence
-    counter, and the generation is what keeps (epoch, seq) -- and therefore the
-    nonce -- from repeating something this node has already sent.
+    Always a NEW counter value, never a reused one: re-keying resets the
+    sequence counter, and the generation is what keeps (epoch, seq) -- and
+    therefore the nonce -- from repeating something this node has already sent.
+    The counter is tied to the key's fingerprint (see mesh.load_epoch): a new
+    key starts at 0, the same key keeps counting, and after 256 values under one
+    key the Mesh refuses to transmit until the passphrase is changed. The same
+    refusal applies when the counter cannot be written; there is no random
+    fallback.
     """
-    epoch, persisted = mesh.load_epoch()
-    if not persisted:
-        RNS.log(
-            "[cot-bridge] could not persist the mesh epoch; using a random one. "
-            "Nonce uniqueness across restarts is no longer guaranteed",
-            RNS.LOG_WARNING,
-        )
-    m = mesh.Mesh(_NODE_ID, mesh.derive_key(passphrase), epoch=epoch,
-                  on_epoch_change=mesh.save_epoch)
+    global _NODE_ID, _NODE_ID_WAS_FRESH, _node_id_regenerated
+    key = mesh.derive_key(passphrase)
+    fp = mesh.key_fingerprint(key)
+    claim = mesh.load_epoch(fp=fp)
+    counter_reset = claim.counter_reset
+    if counter_reset:
+        if _NODE_ID_WAS_FRESH:
+            # First run on this install: no counter file is expected.
+            counter_reset = False
+        else:
+            # The counter file vanished but this node's id survived: the
+            # counter restarts at 0 under a key that may be unchanged, and
+            # peers would reject the "older" epoch from the same origin. Come
+            # back as a new node instead.
+            _NODE_ID = _load_node_id(regenerate=True)
+            _node_id_regenerated = True
+            RNS.log(
+                "[cot-bridge] transmit counter file was lost; this node's id "
+                f"is now {_NODE_ID}. Change the passphrase soon",
+                RNS.LOG_WARNING,
+            )
+    _NODE_ID_WAS_FRESH = False
+    if claim.exhausted == mesh.EXHAUSTED_SPACE:
+        RNS.log("[cot-bridge] " + mesh.STATUS_SPACE, RNS.LOG_ERROR)
+    elif claim.exhausted == mesh.EXHAUSTED_PERSIST:
+        RNS.log("[cot-bridge] " + mesh.STATUS_PERSIST, RNS.LOG_ERROR)
+    m = mesh.Mesh(_NODE_ID, key, epoch=claim.counter,
+                  on_epoch_change=lambda c: mesh.save_epoch(c, fp),
+                  exhausted=claim.exhausted, counter_reset=counter_reset)
     m.accept_clear = _fm_clear
     return m
 
@@ -3082,6 +3128,21 @@ def _startup_active_link(intended_link, built_links):
     return None
 
 
+_tx_stopped_logged = None
+
+
+def _note_tx_stopped(error):
+    """wrap() refused because the nonce counter is spent or unwritable. Logged
+    once per distinct reason, not once per dropped frame; the standing
+    explanation is in get_status()["tx_stopped"] and the mesh summary line."""
+    global _tx_stopped_logged
+    reason = str(error)
+    if reason != _tx_stopped_logged:
+        _tx_stopped_logged = reason
+        stopped = _mesh.tx_stopped() if _mesh is not None else None
+        RNS.log("[cot-bridge] %s" % (stopped or reason), RNS.LOG_ERROR)
+
+
 def _transmit_sealed(sealed, link=None):
     """Send one already mesh-wrapped frame, returning True/False the same
     way RNS.Packet(...).send() does (False specifically, not just falsy --
@@ -3113,6 +3174,12 @@ def _transmit_sealed(sealed, link=None):
     rather than a plain attribute access, so a missing interface reports as
     "could not send" instead of crashing the TX loop.
     """
+    active_mesh = _mesh
+    if active_mesh is not None and active_mesh.tx_stopped():
+        # Counter space used up (or not persistable): nothing goes out, not
+        # even a relayed copy. Receiving is unaffected. The reason is in the
+        # status block and the summary line.
+        return False
     target = link or _active_link
     if target == LINK_FM:
         send = getattr(_fm_iface, "process_outgoing", None)
@@ -4529,7 +4596,11 @@ def _send_one_beacon(link, seq, digest, note, fm_extras=False):
     # set that every node's coverage test runs on, so flooding it would make
     # every node look adjacent to every other and destroy the test the
     # whole relay budget depends on.
-    sealed = _mesh.wrap(frame, relay.HOPS_BEACON)
+    try:
+        sealed = _mesh.wrap(frame, relay.HOPS_BEACON)
+    except mesh.MeshError as e:
+        _note_tx_stopped(e)
+        return None
     result = _transmit_sealed(sealed, link=link)
     if result is False:
         RNS.log(
@@ -7253,6 +7324,9 @@ def _rns_tx_loop():
                 if not out.sealed:
                     try:
                         frame = _mesh.wrap(frame, _hops_for(frame))
+                    except mesh.MeshError as e:
+                        _note_tx_stopped(e)
+                        continue
                     except Exception as e:
                         RNS.log(f"[cot-bridge] could not wrap frame for sending: {e}",
                                 RNS.LOG_ERROR)
@@ -7593,6 +7667,10 @@ def get_status():
             # noticing.
             "mesh": _mesh.stats() if _mesh is not None else {},
             "encrypted": _mesh is not None,
+            # Non-empty when this phone has stopped transmitting because its
+            # nonce counter is used up or cannot be saved. Receiving still works.
+            "tx_stopped": (_mesh.tx_stopped() or "") if _mesh is not None else "",
+            "node_id_changed": _node_id_regenerated,
             # Four characters the operator can compare across devices. Matching
             # is the only quick proof two nodes share a key, because a wrong
             # passphrase and a dead radio look identical from the outside.

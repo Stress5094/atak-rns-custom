@@ -141,7 +141,7 @@ class TestBridgeHook(unittest.TestCase):
     def test_mesh_built_later_inherits_the_setting(self):
         # No epoch file: _build_mesh would otherwise persist one in ~.
         saved = mesh.load_epoch
-        mesh.load_epoch = lambda *a, **k: (7, True)
+        mesh.load_epoch = lambda *a, **k: mesh.EpochClaim(7, None, False)
         self.addCleanup(setattr, mesh, "load_epoch", saved)
         rns_bridge.set_fm_clear(True)
         self.assertTrue(rns_bridge._build_mesh("bench passphrase").accept_clear)

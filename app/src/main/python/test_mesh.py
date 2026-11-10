@@ -266,17 +266,23 @@ class TestFrameIds(unittest.TestCase):
         self.assertEqual(saved, [8])
 
     def test_a_failing_epoch_store_does_not_lose_the_bump(self):
+        # The bump still stands; but a counter that could not be saved means a
+        # restart could reuse it, so the NEXT allocation refuses (fix C).
         def explode(_):
             raise OSError("read-only filesystem")
         m = node(epoch=7, on_epoch_change=explode)
         m._seq = 0xFFFF
         m.next_frame_id()
-        self.assertEqual(m.next_frame_id(), (8, 0))
+        self.assertEqual(m.stats()["epoch"], 8)
+        with self.assertRaises(mesh.MeshError) as cm:
+            m.next_frame_id()
+        self.assertIn("persist", str(cm.exception))
 
     def test_no_nonce_repeats_across_a_wrap(self):
         # The property that actually matters: distinct (epoch, seq) must give
         # distinct nonces, including across the wrap boundary.
-        m = node(epoch=0xFF)
+        # 0x7F, not 0xFF: wrapping the byte is exactly what is now refused.
+        m = node(epoch=0x7F)
         m._seq = 0xFFFE
         seen = set()
         for _ in range(4):
@@ -318,6 +324,8 @@ class TestFrameIds(unittest.TestCase):
 
 
 class TestLoadEpoch(unittest.TestCase):
+    FP = "ab12"
+
     def setUp(self):
         import tempfile
         self.dir = tempfile.mkdtemp()
@@ -327,29 +335,132 @@ class TestLoadEpoch(unittest.TestCase):
         import shutil
         shutil.rmtree(self.dir, ignore_errors=True)
 
-    def test_first_run_starts_at_zero_and_persists(self):
-        self.assertEqual(mesh.load_epoch(self.path), (0, True))
+    def _stored(self):
+        import json
+        with open(self.path) as f:
+            return json.load(f)
 
-    def test_each_start_advances_the_generation(self):
-        self.assertEqual([mesh.load_epoch(self.path)[0] for _ in range(4)],
-                         [0, 1, 2, 3])
+    def test_first_run_starts_at_zero_persists_and_flags_a_lost_file(self):
+        c = mesh.load_epoch(self.path, self.FP)
+        self.assertEqual((c.counter, c.exhausted), (0, None))
+        self.assertTrue(c.counter_reset)
+        self.assertEqual(self._stored(), {"fp": self.FP, "counter": 0})
 
-    def test_a_corrupt_file_does_not_stop_startup(self):
+    def test_each_start_under_the_same_key_advances_the_counter(self):
+        got = [mesh.load_epoch(self.path, self.FP) for _ in range(4)]
+        self.assertEqual([c.counter for c in got], [0, 1, 2, 3])
+        self.assertEqual([c.counter_reset for c in got], [True, False, False, False])
+
+    def test_a_bare_int_file_migrates_and_is_adopted_under_the_current_key(self):
         with open(self.path, "w") as f:
-            f.write("not a number")
-        self.assertEqual(mesh.load_epoch(self.path), (0, True))
+            f.write("41")
+        c = mesh.load_epoch(self.path, self.FP)
+        self.assertEqual((c.counter, c.exhausted, c.counter_reset), (42, None, False))
+        self.assertEqual(self._stored(), {"fp": self.FP, "counter": 42})
 
-    def test_the_generation_wraps_within_a_byte(self):
+    def test_a_different_key_resets_the_counter(self):
+        mesh.load_epoch(self.path, self.FP)
+        mesh.load_epoch(self.path, self.FP)
+        c = mesh.load_epoch(self.path, "ffff")
+        self.assertEqual((c.counter, c.exhausted, c.counter_reset), (0, None, False))
+        self.assertEqual(self._stored()["fp"], "ffff")
+
+    def test_the_same_key_continues_where_it_left_off(self):
+        mesh.load_epoch(self.path, "ffff")
+        self.assertEqual(mesh.load_epoch(self.path, "ffff").counter, 1)
+
+    def test_a_corrupt_file_restarts_at_zero_and_says_so(self):
+        for junk in ("not a number", "{}", '{"fp": "x"}', '{"counter": -3}',
+                     '{"counter": "5"}', "true", "[1]", ""):
+            with open(self.path, "w") as f:
+                f.write(junk)
+            c = mesh.load_epoch(self.path, self.FP)
+            self.assertEqual((c.counter, c.exhausted, c.counter_reset),
+                             (0, None, True), junk)
+
+    def test_the_counter_is_never_masked(self):
+        with open(self.path, "w") as f:
+            f.write('{"fp": "%s", "counter": 254}' % self.FP)
+        self.assertEqual(mesh.load_epoch(self.path, self.FP).counter, 255)
+        c = mesh.load_epoch(self.path, self.FP)
+        self.assertEqual((c.counter, c.exhausted), (256, mesh.EXHAUSTED_SPACE))
+        # Exhaustion writes nothing: the file still says 255.
+        self.assertEqual(self._stored()["counter"], 255)
+
+    def test_a_legacy_255_is_exhausted_under_the_current_key(self):
         with open(self.path, "w") as f:
             f.write("255")
-        self.assertEqual(mesh.load_epoch(self.path), (0, True))
+        self.assertEqual(mesh.load_epoch(self.path, self.FP).exhausted,
+                         mesh.EXHAUSTED_SPACE)
 
-    def test_an_unwritable_path_reports_that_it_did_not_persist(self):
-        # The caller logs this: falling back to a random generation is a real
-        # weakening of the nonce guarantee, not a detail to pass over.
-        epoch, persisted = mesh.load_epoch(self.dir + "/no/such/dir/epoch")
-        self.assertFalse(persisted)
-        self.assertTrue(0 <= epoch <= 0xFF)
+    def test_rekeying_at_exhaustion_clears_it(self):
+        with open(self.path, "w") as f:
+            f.write('{"fp": "%s", "counter": 255}' % self.FP)
+        self.assertEqual(mesh.load_epoch(self.path, self.FP).exhausted,
+                         mesh.EXHAUSTED_SPACE)
+        c = mesh.load_epoch(self.path, "9999")
+        self.assertEqual((c.counter, c.exhausted), (0, None))
+
+    def test_an_unwritable_path_stops_transmit_rather_than_going_random(self):
+        c = mesh.load_epoch(self.dir + "/no/such/dir/epoch", self.FP)
+        self.assertEqual(c.exhausted, mesh.EXHAUSTED_PERSIST)
+        self.assertEqual(c.counter, 0)  # deterministic: no random epoch
+
+    def test_there_is_no_random_epoch_left(self):
+        import inspect
+        self.assertNotIn("urandom", inspect.getsource(mesh.load_epoch))
+
+    def test_save_epoch_reports_failure(self):
+        self.assertFalse(mesh.save_epoch(3, self.FP, self.dir + "/no/such/dir/e"))
+        self.assertTrue(mesh.save_epoch(3, self.FP, self.path))
+
+
+@skip_without_backend
+class TestEpochExhaustion(unittest.TestCase):
+    def test_counter_255_still_transmits_256_does_not(self):
+        m = node(epoch=255)
+        self.assertEqual(m.next_frame_id(), (255, 0))
+        self.assertIsNone(m.tx_stopped())
+        w = node(epoch=256)
+        with self.assertRaises(mesh.MeshError) as cm:
+            w.wrap(INNER)
+        self.assertIn("nonce space exhausted", str(cm.exception))
+        self.assertIn("TRANSMIT STOPPED", w.tx_stopped())
+
+    def test_unwrap_still_works_when_exhausted(self):
+        sender = node(PEER, epoch=3)
+        receiver = node(ME, epoch=256)
+        got = receiver.unwrap(sender.wrap(INNER))
+        self.assertEqual(got.frame, INNER)
+
+    def test_a_seq_wrap_into_256_stops_the_mesh_after_that_frame(self):
+        m = node(epoch=255)
+        m._seq = 0xFFFF
+        self.assertEqual(m.next_frame_id(), (255, 0xFFFF))
+        with self.assertRaises(mesh.MeshError):
+            m.next_frame_id()
+        self.assertIn("TRANSMIT STOPPED", m.summary_line())
+
+    def test_the_wire_epoch_is_the_low_byte(self):
+        m = node(epoch=200)
+        self.assertEqual(m.next_frame_id()[0], 200)
+
+    def test_a_failed_save_on_wrap_stops_transmit(self):
+        m = node(epoch=5, on_epoch_change=lambda c: False)
+        m._seq = 0xFFFF
+        m.next_frame_id()
+        with self.assertRaises(mesh.MeshError):
+            m.wrap(INNER)
+        self.assertIn("persist", m.tx_stopped())
+
+    def test_counter_reset_is_reported_once(self):
+        m = node(epoch=0, counter_reset=True)
+        self.assertIn("COUNTER FILE WAS LOST", m.summary_line())
+        self.assertNotIn("COUNTER FILE WAS LOST", m.summary_line())
+
+    def test_stats_carry_the_stop(self):
+        self.assertIn("tx_stopped", node(epoch=256).stats())
+        self.assertNotIn("tx_stopped", node(epoch=1).stats())
 
 
 # ---------------------------------------------------------------------------
