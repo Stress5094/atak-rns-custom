@@ -138,7 +138,9 @@ ATAK's own mesh networking already uses 8087.
 
 ## 5. The screens
 
-The app has five tabs: **Status, Debug, Mesh, Coverage, Share**.
+The app has four tabs: **Status, Debug, Mesh, Coverage**. A fifth, **Share**,
+appears when you turn on *Debug → Show advanced features → Show the Share
+tab*.
 
 ### Status
 
@@ -191,6 +193,9 @@ The tab you use day to day.
 Bench and field-test tools.
 
 - **Advanced features:** **Show advanced features** reveals:
+  - **Show the Share tab:** off by default. *Share QR* and *Scan QR* on the
+    Status tab work either way. With the tab hidden, settings offers that
+    arrive over Wi-Fi open as a dialog instead.
   - **Show detailed status on the Status tab:** off by default. When off, the
     Status tab hides its informational lines: the build stamp, the FM net
     code and settings, the FM receive summary and the re-send counts.
@@ -244,6 +249,7 @@ prediction and hasn't been checked against measured range.
 
 ### Share
 
+Hidden unless *Show the Share tab* is on (Debug → Advanced features).
 Settings sharing between phones. See [section 11](#11-sharing-settings-with-a-team).
 
 - **This phone as a host:** **Host settings for phones on this WiFi**.
@@ -619,7 +625,7 @@ changes at once and nobody is left on the old settings
   what to include. *Scan QR* on the others. A QR code that includes the
   passphrase gives the network key to anyone who photographs it.
 - **Over Wi-Fi:**
-  1. On the host: *Share → Host settings for phones on this WiFi*.
+  1. Turn on the Share tab on each phone (see above). On the host: *Share → Host settings for phones on this WiFi*.
   2. On the others: *Share → Listen for hosts on this WiFi*, then approve the
      host.
   3. On the host: **Push settings**.

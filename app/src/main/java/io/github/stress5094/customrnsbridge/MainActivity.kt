@@ -175,7 +175,10 @@ class MainActivity : AppCompatActivity() {
     fun showSharedSettingsOffers() = shareUi.showWaitingOffers()
 
     /** Everything else about sharing settings lives on the Share tab. */
-    fun showShareTab() = showTab(4)
+    fun showShareTab() {
+        // With the tab hidden (the default), the offers open as a dialog.
+        if (RadioLink.shareTabEnabled(this)) showTab(4) else shareUi.showWaitingOffers()
+    }
 
     /** A settings host was heard on WiFi and waits for this phone's say-so. */
     fun showFoundSettingsHosts() = shareUi.showFoundHosts()
@@ -484,6 +487,7 @@ class MainActivity : AppCompatActivity() {
                    "Share" to R.drawable.ic_nav_share).forEachIndexed { i, (label, icon) ->
                 menu.add(android.view.Menu.NONE, i, i, label).setIcon(icon)
             }
+            menu.findItem(4).isVisible = RadioLink.shareTabEnabled(this@MainActivity)
             setOnItemSelectedListener { item ->
                 if (item.itemId != currentTab) showTab(item.itemId)
                 true
@@ -1674,7 +1678,7 @@ class MainActivity : AppCompatActivity() {
         // and in Radio link the WiFi mesh, custom FM, the no-PTT cable and
         // receive-only test mode. It only hides them; values already set stay.
         box.addView(sectionLabel("Advanced features"))
-        box.addView(sectionCaption("Shows link forcing and status detail here, " +
+        box.addView(sectionCaption("Shows link forcing, status detail and the Share tab here, " +
             "and the WiFi mesh and FM tone settings in Radio link"))
         box.addView(com.google.android.material.materialswitch.MaterialSwitch(this).apply {
             text = "Show advanced features"
@@ -1693,6 +1697,15 @@ class MainActivity : AppCompatActivity() {
             isChecked = RadioLink.statusDetails(this@MainActivity)
             setOnCheckedChangeListener { _, on ->
                 RadioLink.setStatusDetails(this@MainActivity, on)
+            }
+        })
+        advancedBox.addView(com.google.android.material.materialswitch.MaterialSwitch(this).apply {
+            text = "Show the Share tab"
+            isChecked = RadioLink.shareTabEnabled(this@MainActivity)
+            setOnCheckedChangeListener { _, on ->
+                RadioLink.setShareTabEnabled(this@MainActivity, on)
+                nav.menu.findItem(4).isVisible = on
+                if (!on && currentTab == 4) showTab(0)
             }
         })
         advancedBox.addView(TextView(this).apply {
