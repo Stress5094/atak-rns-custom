@@ -3,8 +3,8 @@
 Pushes radio settings (LoRa preset, frequency and power; the Coverage model;
 optionally the network passphrase) to the team's phones, the same way a host
 phone does on WiFi, from a Linux machine. Each phone still accepts a change
-with its own PIN, unless it chose to trust this server. The design and the
-reasoning are in `docs/settings-sharing.md`.
+with its own PIN, unless it chose to trust this server. How it works is in
+`docs/USER-GUIDE.md`, section 11.
 
 It is the same code the app runs (`settings_server.py`, `settings_net.py`,
 `settings_share.py`, plus `radio.py`, `coverage.py` and `overture_tiles.py` to

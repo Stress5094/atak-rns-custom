@@ -5,32 +5,18 @@ local.properties
 .idea/
 *.iml
 
-# Python bytecode from running the desktop test suites in app/src/main/python.
+# Python bytecode and the desktop test venv.
 __pycache__/
 *.pyc
-
-# Machine-local tool settings: absolute paths and per-session scratchpad dirs
-# that mean nothing on another machine. The .local.json name is the convention
-# for "not shared".
-.claude/settings.local.json
 .venv/
 
-# Bench recordings from tools/tone_test.py and tools/ptt_test.py
+.claude/settings.local.json
 *.wav
 
-# Built by tools/build_libcodec2_android.sh, not committed: it's a compiled
-# binary tied to one NDK/ABI/version combination, reproducible from source in
-# a few minutes and no more meant to be tracked than build/ is.
+# Built by tools/build_libcodec2_android.sh: a compiled binary tied to one
+# NDK/ABI, reproducible from source in a few minutes.
 app/src/main/jniLibs/
 
-# Raw bench data stays outside the repo (rtak-bridge/bench-data/rtak-results-raw/):
-# phone logs and logcats carry real device IDs and MACs, range-test CSVs and
-# coverage maps carry real GPS positions. Already-committed logs were checked
-# clean and are unaffected by these rules. See tools/privacy_check.sh.
-results/**/bridge-*.log*
-results/**/*logcat*.txt
-results/**/rangetest-*.csv
-results/**/coverage_map*
-
-# Exact real values for tools/privacy_check.sh -- never published.
+# Field data never goes in the repo.
+results/
 tools/privacy_patterns.local
