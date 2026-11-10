@@ -92,8 +92,6 @@ Everything here lives under **Status → Radio link**.
 
 - **Use FM as automatic backup:** builds the FM link next to LoRa. FM then
   takes over if LoRa fails (see [section 8](#8-routing-which-radio-carries-what)).
-- **FM tone placement:** *fast* (the default), *narrow* or *wide*. Every
-  radio on a net must use the same placement.
 - **Which radio:** when more than one radio is paired, choose which one this
   phone uses. With two paired and none chosen, the app waits rather than
   guessing.
@@ -104,9 +102,10 @@ values.
 
 - **Use a WiFi mesh as an additional link:** adds Wi-Fi as the last-resort
   link.
-- **Custom** tone placement: your own tones, rate and keying, set in
-  [Custom FM settings](#custom-fm-settings) via **Edit custom settings…**.
-  If Custom is already in use, it stays visible with the switch off.
+- **FM tone placement** (shown when FM is in use): *fast* (the default),
+  *narrow*, *wide*, or **Custom**, which is your own tones, rate and keying,
+  set in [Custom FM settings](#custom-fm-settings) via **Edit custom
+  settings…**. Every radio on a net must use the same placement.
 - **Cable has no PTT pin (K1 PRO / VOX radio):** keys the radio with its
   voice-operated switch instead of the PTT line.
 - **Test mode: receive only, do not transmit:** for listening without keying
@@ -192,6 +191,10 @@ The tab you use day to day.
 Bench and field-test tools.
 
 - **Advanced features:** **Show advanced features** reveals:
+  - **Show detailed status on the Status tab:** off by default. When off, the
+    Status tab hides its informational lines: the build stamp, the FM net
+    code and settings, the FM receive summary and the re-send counts.
+    Warnings always show, including which way to turn the volume knob.
   - **Link:** **Auto** lets the app choose. **Force LoRa / Force FM / Force
     WiFi** pins one link after you confirm. Health is still measured
     underneath, so going back to *Auto* resumes cleanly. A `*` marks the

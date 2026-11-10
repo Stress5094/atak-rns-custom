@@ -328,6 +328,19 @@ object RadioLink {
         prefs(context).edit().putBoolean(KEY_ADVANCED, on).apply()
     }
 
+    /** Debug → Advanced features → "Show detailed status". Off by default:
+     * the Status tab then leaves out its informational lines (build stamp,
+     * FM net code and operating point, receive summary, re-send counts) and
+     * keeps only the warnings. */
+    private const val KEY_STATUS_DETAILS = "status_details"
+
+    fun statusDetails(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_STATUS_DETAILS, false)
+
+    fun setStatusDetails(context: Context, on: Boolean) {
+        prefs(context).edit().putBoolean(KEY_STATUS_DETAILS, on).apply()
+    }
+
     /** Bluetooth address of the chosen radio, or null to use the only paired one. */
     fun bleAddress(context: Context): String? =
         prefs(context).getString(KEY_BLE_ADDRESS, null)
