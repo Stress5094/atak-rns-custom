@@ -319,6 +319,11 @@ Everything every phone on the network must match, in one dialog.
     bits). Nothing changes until you tap **Apply**.
   - There is **no default**. A phone with no passphrase makes up its own and
     stays alone, rather than joining a network anyone could read.
+  - If you type a passphrase of your own and it looks easy to guess (a short
+    phrase of ordinary words and a year, say), tapping **Apply** asks whether
+    to use it anyway. Anyone who records your radio traffic can try guesses
+    against it offline, so **New passphrase** is the safer choice. This is
+    only a warning; the six-word phrases never trigger it.
 - **LoRa preset, Frequency, Transmit power:** as below.
 - **Meshtastic board settings…** (Meshtastic radio only): opens the
   [Meshtastic board](#meshtastic-board) dialog.
