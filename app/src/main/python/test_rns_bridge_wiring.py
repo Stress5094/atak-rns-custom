@@ -4178,3 +4178,106 @@ class TestGaveUpReport(unittest.TestCase):
         (level, msg), = self.logged
         self.assertEqual(level, "error")
         self.assertIn("UNDELIVERED b-t-f GeoChat.x after 4 transmission(s) on lora", msg)
+
+
+@unittest.skipUnless(mesh.HAVE_AEAD, "no AEAD backend")
+class TestExhaustedMeshStopsTransmitting(unittest.TestCase):
+    """Fix C: a Mesh whose nonce counter is spent (or unwritable) must stop the
+    phone transmitting, say so in the status block, and keep receiving."""
+
+    def setUp(self):
+        self._orig_mesh = rns_bridge._mesh
+        self._orig_logged = rns_bridge._tx_stopped_logged
+        rns_bridge._tx_stopped_logged = None
+        self.exhausted = mesh.Mesh("aa11bb", mesh.derive_key("x", rounds=1),
+                                   epoch=256)
+        rns_bridge._mesh = self.exhausted
+
+    def tearDown(self):
+        rns_bridge._mesh = self._orig_mesh
+        rns_bridge._tx_stopped_logged = self._orig_logged
+
+    def test_transmit_sealed_refuses(self):
+        self.assertIs(rns_bridge._transmit_sealed(b"sealed"), False)
+
+    def test_status_carries_the_message(self):
+        import json
+        status = json.loads(rns_bridge.get_status())
+        self.assertIn("TRANSMIT STOPPED", status["tx_stopped"])
+        self.assertIn("NEW passphrase", status["tx_stopped"])
+        self.assertIn("TRANSMIT STOPPED", self.exhausted.summary_line())
+
+    def test_a_healthy_mesh_reports_nothing(self):
+        import json
+        rns_bridge._mesh = mesh.Mesh("aa11bb", mesh.derive_key("x", rounds=1),
+                                     epoch=3)
+        self.assertEqual(json.loads(rns_bridge.get_status())["tx_stopped"], "")
+
+    def test_the_beacon_path_drops_instead_of_raising(self):
+        class _Up(object):
+            online = True
+        orig = rns_bridge._iface_for
+        rns_bridge._iface_for = lambda link: _Up()
+        try:
+            self.assertIsNone(rns_bridge._send_one_beacon(
+                rns_bridge.LINK_LORA, 1, None, "test"))
+        finally:
+            rns_bridge._iface_for = orig
+        self.assertIn("nonce space exhausted", rns_bridge._tx_stopped_logged)
+
+    def test_receiving_still_works(self):
+        sender = mesh.Mesh("cc22dd", mesh.derive_key("x", rounds=1), epoch=1)
+        got = self.exhausted.unwrap(sender.wrap(b"\x01hello"))
+        self.assertEqual(got.frame, b"\x01hello")
+
+
+@unittest.skipUnless(mesh.HAVE_AEAD, "no AEAD backend")
+class TestLostCounterFileChangesTheNodeId(unittest.TestCase):
+    """Fix C step 4 / fix A: a lost counter file under a surviving node id would
+    restart the counter at 0 for an origin peers already track, so the node
+    comes back as a new origin."""
+
+    def setUp(self):
+        import tempfile
+        self.dir = tempfile.mkdtemp()
+        self.saved = (rns_bridge._NODE_ID_PATH, mesh._EPOCH_PATH,
+                      rns_bridge._NODE_ID, rns_bridge._NODE_ID_WAS_FRESH,
+                      rns_bridge._node_id_regenerated, mesh.load_epoch.__defaults__,
+                      mesh.save_epoch.__defaults__)
+        rns_bridge._NODE_ID_PATH = self.dir + "/node"
+        epoch_path = self.dir + "/epoch"
+        mesh.load_epoch.__defaults__ = (epoch_path, None)
+        mesh.save_epoch.__defaults__ = (None, epoch_path)
+        with open(rns_bridge._NODE_ID_PATH, "w") as f:
+            f.write("a1b2c3")
+        rns_bridge._NODE_ID = "a1b2c3"
+        rns_bridge._NODE_ID_WAS_FRESH = False
+        rns_bridge._node_id_regenerated = False
+
+    def tearDown(self):
+        import shutil
+        (rns_bridge._NODE_ID_PATH, mesh._EPOCH_PATH, rns_bridge._NODE_ID,
+         rns_bridge._NODE_ID_WAS_FRESH, rns_bridge._node_id_regenerated,
+         mesh.load_epoch.__defaults__, mesh.save_epoch.__defaults__) = self.saved
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def test_missing_counter_file_with_a_surviving_node_id_regenerates_it(self):
+        m = rns_bridge._build_mesh("squad passphrase")
+        self.assertNotEqual(rns_bridge._NODE_ID, "a1b2c3")
+        self.assertEqual(m.origin.hex(), rns_bridge._NODE_ID)
+        self.assertTrue(rns_bridge._node_id_regenerated)
+        self.assertIn("COUNTER FILE WAS LOST", m.summary_line())
+
+    def test_a_present_counter_file_keeps_the_node_id(self):
+        rns_bridge._build_mesh("squad passphrase")
+        rns_bridge._NODE_ID = "a1b2c3"
+        rns_bridge._node_id_regenerated = False
+        m = rns_bridge._build_mesh("squad passphrase")
+        self.assertEqual(rns_bridge._NODE_ID, "a1b2c3")
+        self.assertFalse(m.counter_reset)
+
+    def test_a_fresh_install_is_not_a_lost_file(self):
+        rns_bridge._NODE_ID_WAS_FRESH = True
+        m = rns_bridge._build_mesh("squad passphrase")
+        self.assertEqual(rns_bridge._NODE_ID, "a1b2c3")
+        self.assertFalse(m.counter_reset)
