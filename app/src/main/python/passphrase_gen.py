@@ -25,6 +25,7 @@ Word list: EFF Short Wordlist 1, Electronic Frontier Foundation, CC BY 3.0 US
 """
 
 import math
+import re
 import secrets
 
 DEFAULT_WORDS = 6
@@ -198,3 +199,59 @@ def generate(n_words=DEFAULT_WORDS):
 def bits(n_words=DEFAULT_WORDS):
     """How much a guesser has to search, in bits, before the key derivation."""
     return n_words * math.log2(len(WORDS))
+
+
+# Below this, a passphrase is "weak": guessable by someone who recorded the radio
+# and attacks the key offline at leisure (the 200,000-round KDF buys ~17.6 bits
+# on top of this, which is not enough to rescue a short word-and-number phrase).
+WEAK_BELOW_BITS = 40
+
+_WORDS_SET = frozenset(WORDS)
+_GENERATED_SHAPE = re.compile(r"^[a-z]+(-[a-z]+)+$")
+_SEPARATORS = " -_.,"
+
+
+def estimate_bits(passphrase):
+    """A FLOOR ESTIMATE of how hard a passphrase is to guess, in bits. This is a
+    heuristic for warning people, NOT a measurement of entropy; it can be wrong
+    in both directions and is only ever used to say "probably guessable".
+
+    * Words from our own list joined by dashes (what the generator makes):
+      words * log2(1295), exactly the figure passphrase_gen.bits() gives.
+    * Anything else: length * bits-per-character, where bits-per-character is
+      log2 of the character pool (lower 26, upper 26, digits 10, anything else
+      32), capped. The cap is the point: people choose words, names and years,
+      not random characters, so a long-looking "alpha squad 2026" is nowhere
+      near the 97 bits its pool would suggest. Text made of only lowercase
+      letters, digits and separators is capped at 2 bits a character; anything
+      with capitals or symbols at 4.
+    """
+    try:
+        text = passphrase or ""
+        if _GENERATED_SHAPE.match(text):
+            words = text.split("-")
+            if all(w in _WORDS_SET for w in words):
+                return len(words) * math.log2(len(WORDS))
+        if not text:
+            return 0.0
+        pool = 0
+        if any(c.islower() and c.isascii() for c in text):
+            pool += 26
+        if any(c.isupper() and c.isascii() for c in text):
+            pool += 26
+        if any(c.isdigit() and c.isascii() for c in text):
+            pool += 10
+        if any(not (c.isascii() and c.isalnum()) for c in text):
+            pool += 32
+        has_upper = any(c.isupper() for c in text)
+        plain = all((c.isascii() and (c.islower() or c.isdigit())) or c in _SEPARATORS
+                    for c in text)
+        cap = 2.0 if (plain and not has_upper) else 4.0
+        return len(text) * min(math.log2(max(pool, 2)), cap)
+    except Exception:
+        return 0.0
+
+
+def is_weak(passphrase):
+    """True when estimate_bits() is under WEAK_BELOW_BITS."""
+    return estimate_bits(passphrase) < WEAK_BELOW_BITS

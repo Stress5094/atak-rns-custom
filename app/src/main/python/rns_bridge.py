@@ -1394,6 +1394,19 @@ def generate_mesh_passphrase():
     return passphrase_gen.generate()
 
 
+def passphrase_strength(passphrase):
+    """JSON {"bits": float, "weak": bool} for the Network settings dialog, which
+    warns (never blocks) on a weak typed passphrase. The figure is a floor
+    estimate, see passphrase_gen.estimate_bits. Never raises."""
+    try:
+        import passphrase_gen
+        bits = passphrase_gen.estimate_bits(passphrase)
+        return json.dumps({"bits": round(bits, 1),
+                           "weak": bits < passphrase_gen.WEAK_BELOW_BITS})
+    except Exception:
+        return json.dumps({"bits": 0.0, "weak": False})
+
+
 def _key_fingerprint():
     """Cached off the passphrase file rather than recomputed: derive_key() is
     deliberately slow (200k PBKDF2 rounds), and get_status() runs every two

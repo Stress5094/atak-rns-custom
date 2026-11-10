@@ -4281,3 +4281,20 @@ class TestLostCounterFileChangesTheNodeId(unittest.TestCase):
         m = rns_bridge._build_mesh("squad passphrase")
         self.assertEqual(rns_bridge._NODE_ID, "a1b2c3")
         self.assertFalse(m.counter_reset)
+
+
+class TestPassphraseStrength(unittest.TestCase):
+    def test_a_generated_passphrase_is_not_weak(self):
+        got = json.loads(rns_bridge.passphrase_strength(
+            rns_bridge.generate_mesh_passphrase()))
+        self.assertFalse(got["weak"])
+        self.assertAlmostEqual(got["bits"], 62.0, places=1)
+
+    def test_a_guessable_one_is_weak(self):
+        got = json.loads(rns_bridge.passphrase_strength("alpha squad 2026"))
+        self.assertTrue(got["weak"])
+        self.assertLess(got["bits"], 40)
+
+    def test_it_never_raises(self):
+        for bad in (None, "", "\u2603" * 5, 12):
+            self.assertIn("weak", json.loads(rns_bridge.passphrase_strength(bad)))

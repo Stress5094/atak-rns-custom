@@ -2259,9 +2259,39 @@ class MainActivity : AppCompatActivity() {
                     passBox.error = "Cannot be empty"
                     return@setOnClickListener
                 }
-                dialog.dismiss()
-                if (entered != currentPassphrase) applyPassphrase(entered)
-                readRadio()?.let { (preset, freq, power) -> applyRadio(preset, freq, power) }
+                val proceed = {
+                    dialog.dismiss()
+                    if (entered != currentPassphrase) applyPassphrase(entered)
+                    readRadio()?.let { (preset, freq, power) -> applyRadio(preset, freq, power) }
+                }
+                if (entered == currentPassphrase) {
+                    proceed()
+                    return@setOnClickListener
+                }
+                // A typed passphrase that is guessable by someone recording the
+                // radio gets one confirmation. Warning only: [Use it anyway]
+                // proceeds. If the bridge cannot say, it proceeds silently.
+                executor.execute {
+                    val weak = try {
+                        JSONObject(callPython("passphrase_strength", entered) ?: "{}")
+                            .optBoolean("weak", false)
+                    } catch (e: Exception) {
+                        false
+                    }
+                    handler.post {
+                        if (!weak) {
+                            proceed()
+                        } else {
+                            MaterialAlertDialogBuilder(this)
+                                .setTitle("Weak passphrase")
+                                .setMessage("This passphrase is guessable by someone " +
+                                    "recording the radio. Use 'New passphrase' instead?")
+                                .setPositiveButton("Use it anyway") { _, _ -> proceed() }
+                                .setNegativeButton("Go back", null)
+                                .show()
+                        }
+                    }
+                }
             }
         }
         dialog.show()
