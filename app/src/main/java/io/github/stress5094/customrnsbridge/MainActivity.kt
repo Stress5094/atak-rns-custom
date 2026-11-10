@@ -1668,7 +1668,7 @@ class MainActivity : AppCompatActivity() {
         renderLink()
         // Settings by QR code, the in-person case, both ways: show this
         // phone's, or scan another's. Everything else is on the Share tab.
-        box.addView(row(Ui.outlined(this, "Share QR").apply {
+        box.addView(row(Ui.outlined(this, "Share settings").apply {
             setOnClickListener { shareUi.showQrShare() }
         }, Ui.outlined(this, "Scan QR").apply {
             setOnClickListener { shareUi.scanQr() }
@@ -1779,7 +1779,7 @@ class MainActivity : AppCompatActivity() {
                 "settings, the coverage model, and optionally the passphrase. " +
                 "One phone hosts; each phone approves a change with its own PIN " +
                 "(or trusts the host), and everyone switches at the same moment. " +
-                "Nothing is sent over the radio. Share QR and Scan QR on the " +
+                "Nothing is sent over the radio. Share settings and Scan QR on the " +
                 "Status tab work without it."
             textSize = 12f
             setTextColor(COLOR_IDLE)

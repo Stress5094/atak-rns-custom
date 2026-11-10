@@ -288,7 +288,7 @@ class SettingsShareUi(
             .also { box.addView(it) }
 
         // Sharing by QR code in person is not repeated here: its two buttons,
-        // Share QR and Scan QR, are on the Status tab.
+        // Share settings and Scan QR, are on the Status tab.
 
         box.addView(heading("This phone as a host"))
         pageHostButton = button("Host settings for phones on this WiFi", Ui::tonal) { showHost() }
