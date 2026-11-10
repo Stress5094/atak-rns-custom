@@ -123,6 +123,113 @@ class TestTheBridgeImports(unittest.TestCase):
         self.assertIs(rns_bridge._gates["lora"].link, rns_bridge._lora_link)
 
 
+class TestLateRNode(unittest.TestCase):
+    """A radio that misses the startup window is kept, offline, and used once
+    it connects (2026-11-10: a USB permission prompt held the radio back and
+    the bridge ran FM-only until restarted)."""
+
+    def setUp(self):
+        self._old_iface = rns_bridge._lora_iface
+        self._old_resize = rns_bridge._resize_reassembly
+        self.resized = []
+        rns_bridge._resize_reassembly = self.resized.append
+
+    def tearDown(self):
+        rns_bridge._lora_iface = self._old_iface
+        rns_bridge._resize_reassembly = self._old_resize
+
+    def test_the_build_no_longer_gives_up_on_a_late_radio(self):
+        src = inspect.getsource(rns_bridge._build_rnode_interface)
+        self.assertNotIn("raise RuntimeError", src)
+        self.assertIn("_watch_late_rnode", src)
+
+    def test_resizes_once_the_radio_connects(self):
+        import threading
+        iface = types.SimpleNamespace(online=False)
+        rns_bridge._lora_iface = iface
+        t = threading.Thread(target=rns_bridge._watch_late_rnode, args=(iface, 0.01))
+        t.start()
+        time.sleep(0.05)
+        self.assertEqual(self.resized, [])
+        iface.online = True
+        t.join(2)
+        self.assertFalse(t.is_alive())
+        self.assertEqual(self.resized, [iface])
+
+    def test_stops_quietly_when_the_interface_is_replaced(self):
+        import threading
+        iface = types.SimpleNamespace(online=False)
+        rns_bridge._lora_iface = iface
+        t = threading.Thread(target=rns_bridge._watch_late_rnode, args=(iface, 0.01))
+        t.start()
+        rns_bridge._lora_iface = types.SimpleNamespace(online=True)  # a restart
+        t.join(2)
+        self.assertFalse(t.is_alive())
+        self.assertEqual(self.resized, [])
+
+
+class TestRNodeWatchdog(unittest.TestCase):
+    """RNS can leave an RNode "online" on a closed port with no reconnect
+    running (2026-11-10, a BLE drop 40 ms after a reconnect). The watchdog
+    starts one."""
+
+    class _Port:
+        def __init__(self, is_open):
+            self.is_open = is_open
+
+    def _iface(self, online, port_open, reconnecting=False):
+        iface = types.SimpleNamespace(online=online, reconnecting=reconnecting,
+                                      detached=False, serial=self._Port(port_open),
+                                      reconnects=0)
+
+        def reconnect_port():
+            iface.reconnects += 1
+            rns_bridge._lora_iface = None   # end the watchdog loop
+        iface.reconnect_port = reconnect_port
+        return iface
+
+    def setUp(self):
+        self._old = rns_bridge._lora_iface
+
+    def tearDown(self):
+        rns_bridge._lora_iface = self._old
+
+    def test_what_counts_as_stuck(self):
+        self.assertTrue(rns_bridge._rnode_stuck(self._iface(True, False)))
+        self.assertFalse(rns_bridge._rnode_stuck(self._iface(True, True)))
+        self.assertFalse(rns_bridge._rnode_stuck(self._iface(False, False)))
+        self.assertFalse(rns_bridge._rnode_stuck(self._iface(True, False, reconnecting=True)))
+        no_port = self._iface(True, True)
+        no_port.serial = None
+        self.assertTrue(rns_bridge._rnode_stuck(no_port))
+
+    def test_a_stuck_radio_gets_a_reconnect(self):
+        import threading
+        iface = self._iface(True, False)
+        rns_bridge._lora_iface = iface
+        t = threading.Thread(target=rns_bridge._rnode_port_watchdog, args=(iface, 0.01))
+        t.start()
+        t.join(2)
+        self.assertFalse(t.is_alive())
+        self.assertFalse(iface.online)
+        deadline = time.time() + 2
+        while iface.reconnects == 0 and time.time() < deadline:
+            time.sleep(0.01)
+        self.assertEqual(iface.reconnects, 1)
+
+    def test_a_healthy_radio_is_left_alone(self):
+        import threading
+        iface = self._iface(True, True)
+        rns_bridge._lora_iface = iface
+        t = threading.Thread(target=rns_bridge._rnode_port_watchdog, args=(iface, 0.01))
+        t.start()
+        time.sleep(0.1)
+        rns_bridge._lora_iface = None
+        t.join(2)
+        self.assertTrue(iface.online)
+        self.assertEqual(iface.reconnects, 0)
+
+
 class TestLinkWiring(unittest.TestCase):
 
     def test_there_is_one_link_today_and_it_is_lora(self):
