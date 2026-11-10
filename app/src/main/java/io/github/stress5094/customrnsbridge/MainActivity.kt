@@ -229,6 +229,7 @@ class MainActivity : AppCompatActivity() {
     // Select area + Download area + Saved areas; a saved area is deleted by
     // long-pressing inside it now.)
     private lateinit var coverageDownloadButton: Button
+    private var coverageStatusBeforeSelect: CharSequence? = null
     private lateinit var coveragePeerStatus: TextView
     private lateinit var coveragePeerToggle: android.widget.CompoundButton
     // Guards against stacking coverage runs: the fetch + compute is seconds
@@ -1122,10 +1123,16 @@ class MainActivity : AppCompatActivity() {
         coverageMap.selectMode = on
         coverageDownloadButton.text = if (on) "Cancel download" else "Download an area for offline use"
         if (on) {
+            coverageStatusBeforeSelect = coverageStatus.text
             coverageStatus.text = "Drag a box on the map around the area you want to keep " +
                 "offline. Pinch still zooms."
         } else {
             coverageMap.clearSelection()
+            // Cancelled: put back what the line said before, rather than
+            // leaving the drag instruction up. A finished download overwrites
+            // it straight after with its own result.
+            coverageStatusBeforeSelect?.let { coverageStatus.text = it }
+            coverageStatusBeforeSelect = null
         }
     }
 
