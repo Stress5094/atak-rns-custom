@@ -157,7 +157,7 @@ ATAK's own mesh networking already uses 8087.
 
 ## 5. The screens
 
-The app has three tabs: **Status, Advanced, Network**. Network has two sub-tabs
+The app has three tabs: **Status, Network, Advanced**. Network has two sub-tabs
 at the top, **Mesh** and **Coverage**, and reopens on the one you used last. A
 fourth tab, **Share**, appears when you turn on *Advanced → Show advanced
 features → Show the Share tab*.
