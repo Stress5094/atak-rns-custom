@@ -203,6 +203,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var rangeLine: TextView
     private lateinit var rangeButton: Button
     private lateinit var linkButton: Button
+    private lateinit var advancedBox: LinearLayout
+    private lateinit var overrideNote: TextView
+    private val overrideButtons = mutableListOf<Triple<String, String, Button>>()
     private lateinit var statusPage: View
     private lateinit var radioTestPage: View
     private lateinit var nav: com.google.android.material.bottomnavigation.BottomNavigationView
@@ -784,7 +787,7 @@ class MainActivity : AppCompatActivity() {
                 "LoRa and FM. The receiver is always modelled as a handheld at 1.5 m, and other " +
                 "nodes' coverage keeps 1.5 m for their transmitter too. LoRa uses the " +
                 "radio in use: " + (coverageLoraSummary ?: "its preset, frequency and power") +
-                " — change those under Radio (or on the Meshtastic board)."
+                " — change those under LoRa settings (or on the Meshtastic board)."
             textSize = 12f
             setTextColor(COLOR_IDLE)
             setPadding(0, dp(12), 0, 0)
@@ -1579,7 +1582,7 @@ class MainActivity : AppCompatActivity() {
             Ui.tonal(this, "Passphrase").apply {
                 setOnClickListener { showPassphraseDialog() }
             },
-            Ui.tonal(this, "Radio").apply {
+            Ui.tonal(this, "LoRa settings").apply {
                 setOnClickListener { showRadioDialog() }
             }))
 
@@ -1666,6 +1669,73 @@ class MainActivity : AppCompatActivity() {
             setPadding(0, 0, 0, dp(4))
         })
 
+        // Advanced features (operator, 2026-11-10): one switch that hides the
+        // settings a normal user never needs -- the link force buttons below,
+        // and in Radio link the WiFi mesh, custom FM, the no-PTT cable and
+        // receive-only test mode. It only hides them; values already set stay.
+        box.addView(sectionLabel("Advanced features"))
+        box.addView(sectionCaption("Shows link forcing here, and the WiFi mesh, " +
+            "custom FM, no-PTT cable and test mode options in Radio link"))
+        box.addView(com.google.android.material.materialswitch.MaterialSwitch(this).apply {
+            text = "Show advanced features"
+            isChecked = RadioLink.advancedEnabled(this@MainActivity)
+            setOnCheckedChangeListener { _, on ->
+                RadioLink.setAdvancedEnabled(this@MainActivity, on)
+                advancedBox.visibility = if (on) View.VISIBLE else View.GONE
+            }
+        })
+        advancedBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = if (RadioLink.advancedEnabled(this@MainActivity)) View.VISIBLE else View.GONE
+        }
+        advancedBox.addView(TextView(this).apply {
+            text = "Link"
+            textSize = 13f
+            setPadding(0, dp(8), 0, dp(2))
+        })
+        val overrideRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        fun applyOverride(value: String) {
+            RadioLink.setLinkOverride(this@MainActivity, value)
+            executor.execute { callPython("set_link_override", value) }
+        }
+        // "Auto" applies at once: it is the recovery choice. Forcing can
+        // strand a node on a dead link (the 2026-09-26 field test's 7-minute
+        // stall), so it takes a second, explicit tap on a dialog.
+        for ((label, value) in listOf("Auto" to "auto", "Force LoRa" to "lora",
+                                      "Force FM" to "fm", "Force WiFi" to "wifi")) {
+            val b = Ui.outlined(this, label).apply {
+                textSize = 12f
+                minWidth = 0
+                minimumWidth = 0
+                setPadding(dp(4), paddingTop, dp(4), paddingBottom)
+                layoutParams = LinearLayout.LayoutParams(0, WRAP, 1f)
+                    .apply { marginEnd = dp(4) }
+                setOnClickListener {
+                    if (value == "auto") {
+                        applyOverride(value)
+                    } else {
+                        val name = linkName(value)
+                        MaterialAlertDialogBuilder(this@MainActivity)
+                            .setTitle("Force $name?")
+                            .setMessage("Automatic failover will be suspended until you " +
+                                "tap Auto again, even if $name stops working.")
+                            .setPositiveButton(label) { _, _ -> applyOverride(value) }
+                            .setNegativeButton("Cancel", null)
+                            .show()
+                    }
+                }
+            }
+            overrideButtons.add(Triple(label, value, b))
+            overrideRow.addView(b)
+        }
+        advancedBox.addView(overrideRow)
+        overrideNote = TextView(this).apply {
+            textSize = 12f
+            setTextColor(COLOR_IDLE)
+        }
+        advancedBox.addView(overrideNote)
+        box.addView(advancedBox)
+
         // The log moved here from Status (operator, 2026-10-22): it is for
         // troubleshooting, and it records from start-up whatever this says.
         box.addView(sectionLabel("Log"))
@@ -1751,6 +1821,26 @@ class MainActivity : AppCompatActivity() {
         }))
 
         return box
+    }
+
+    private fun linkName(link: String) = when (link) {
+        "wifi" -> "WiFi"
+        "fm" -> "FM"
+        "auto" -> "Auto"
+        else -> "LoRa"
+    }
+
+    /** The Debug tab's force buttons: "*" marks the one chosen. They do
+     * nothing useful until two links are built, so they say so then. */
+    private fun renderOverrideButtons(override: String, twoLinks: Boolean) {
+        if (overrideButtons.isEmpty()) return
+        for ((label, value, b) in overrideButtons) {
+            b.text = if (override == value) "* $label" else label
+            b.isEnabled = twoLinks
+        }
+        overrideNote.text = if (twoLinks) "* marks the current choice. Auto lets " +
+            "the app fail over and back by itself."
+            else "Only one link is set up, so there is nothing to force."
     }
 
     private fun renderLink() {
@@ -2066,7 +2156,7 @@ class MainActivity : AppCompatActivity() {
         })
 
         return MaterialAlertDialogBuilder(this)
-            .setTitle("Radio")
+            .setTitle("LoRa settings")
             .setView(layout)
             .setPositiveButton("Apply") { _, _ ->
                 applyRadio(
@@ -2579,7 +2669,7 @@ class MainActivity : AppCompatActivity() {
                 localBox.addView(line(
                     "The board is not on this app's settings ($differs " +
                         (if (differs == 1) "difference" else "differences") +
-                        ") - Radio → Use the app's settings",
+                        ") - LoRa settings → Use the app's settings",
                     COLOR_WARN
                 ))
             }
@@ -2708,8 +2798,8 @@ class MainActivity : AppCompatActivity() {
                 localBox.addView(line(
                     "FM TEST MODE: this node is NOT transmitting. It hears " +
                         "traffic but sends no beacons, messages or resends, so " +
-                        "other nodes will lose it. Turn it off in the radio " +
-                        "settings when the test is done.",
+                        "other nodes will lose it. Turn it off in Radio link " +
+                        "(Debug tab → Show advanced features) when the test is done.",
                     COLOR_WARN))
             }
             FmAudioBridgeService.keylessReason?.let {
@@ -2768,102 +2858,59 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Present only when more than one link could exist at all --
-        // absent, not merely inert, on a single-link node. Kotlin's own
-        // preferences decide whether a second link is CONFIGURED; this
-        // "link" block from get_status() is the honest runtime answer to
-        // whether it is actually BUILT and which one is carrying traffic
-        // right now.
+        // Which links exist and which one is carrying traffic, as a row of
+        // buttons: the active link filled, a link standing by as backup
+        // outlined, one that is not set up dimmed. Tapping any opens Radio
+        // link. The force buttons moved to the Debug tab (Advanced features),
+        // so a forced link is spelled out here: it is the one setting that
+        // can strand a node on a dead link with nothing else looking wrong.
+        // The "link" block from get_status() exists only once two links are
+        // BUILT; without it the one link there is is the active one.
         val linkBlock = status.optJSONObject("link")
-        if (linkBlock != null) {
-            val activeLink = linkBlock.optString("active_link", "lora")
-            val override = linkBlock.optString("link_override", "auto")
-            val loraHealth = linkBlock.optJSONObject("lora_health")
-            // Present only once a WiFi interface is actually built -- see
-            // get_status()'s own comment in rns_bridge.py.
-            val wifiHealth = linkBlock.optJSONObject("wifi_health")
-            val activeLabel = when (activeLink) {
-                "wifi" -> "WiFi"
-                "fm" -> "FM (backup)"
-                else -> "LoRa"
+        val fmBuilt = status.optJSONObject("fm") != null
+        val loraBuilt = !RadioLink.isFm(this)
+        val wifiBuilt = linkBlock?.optJSONObject("wifi_health") != null
+        val activeLink = linkBlock?.optString("active_link")
+            ?: if (loraBuilt) "lora" else "fm"
+        val override = linkBlock?.optString("link_override", "auto") ?: "auto"
+        val chips = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(0, dp(4), 0, dp(4))
+        }
+        fun chip(name: String, link: String, built: Boolean) {
+            val active = built && link == activeLink
+            val state = when {
+                active -> "active"
+                built -> "backup"
+                else -> "off"
             }
-            // FM HAS NO HEALTH TRACKER, and that is not an omission -- see
-            // _link_health in rns_bridge.py. FM traffic never goes through
-            // reliable.py's ack-based ARQ, so there is no soft signal to
-            // track; what FM has instead is fm_health's graded receive-path
-            // state, which answers a different question (can this node HEAR
-            // anything) and is reported in its own block above.
-            val activeHealth = when (activeLink) {
-                "wifi" -> wifiHealth
-                "fm" -> null
-                else -> loraHealth
-            }
-            val overrideRow = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                setPadding(dp(24), dp(2), 0, dp(4))
-            }
-            fun applyOverride(value: String) {
-                RadioLink.setLinkOverride(this@MainActivity, value)
-                executor.execute { callPython("set_link_override", value) }
-            }
-            // "auto" applies immediately -- it's the safe/recovery choice
-            // (resumes automatic failover) and an operator reaching for it
-            // in a hurry should never be slowed down. Forcing away from
-            // auto is the one that can silently strand a node on a dead
-            // link (see the 2026-09-26 field test, where this row's own
-            // tiny buttons are the leading suspect for an unexplained
-            // 7-minute failover stall), so those three require a second,
-            // explicit confirmation tap on a dialog -- away from where the
-            // original tap landed -- before taking effect.
-            // The bare link name for the confirmation copy -- "Force LoRa
-            // stops working" reads as if "Force" were part of the radio's
-            // name, so the dialog gets its own clean noun instead of
-            // reusing the button label verbatim.
-            // "*" in a label marks what the OPERATOR forced ("* Auto" when
-            // nothing is). Which link is actually carrying traffic is NOT shown
-            // on these buttons any more: it was a bold, tinted button, and on
-            // 2026-10-23 the operator read a lit "Force LoRa" as LoRa being
-            // forced while the override was Auto. It is now its own line under
-            // the row (operator's choice).
-            fun overrideCell(label: String, value: String, linkName: String) =
-                Ui.outlined(this, if (override == value) "* $label" else label).apply {
+            val b = if (active) Ui.filled(this, "$name · $state")
+                    else Ui.outlined(this, "$name · $state")
+            b.apply {
                 textSize = 12f
                 minWidth = 0
                 minimumWidth = 0
                 setPadding(dp(4), paddingTop, dp(4), paddingBottom)
-                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                alpha = if (built) 1f else 0.45f
+                layoutParams = LinearLayout.LayoutParams(0, WRAP, 1f)
                     .apply { marginEnd = dp(4) }
-                setOnClickListener {
-                    if (value == "auto") {
-                        applyOverride(value)
-                    } else {
-                        MaterialAlertDialogBuilder(this@MainActivity)
-                            .setTitle("Force $linkName?")
-                            .setMessage(
-                                "Automatic failover will be suspended until you " +
-                                    "tap Auto again, even if $linkName stops working.")
-                            .setPositiveButton(label) { _, _ -> applyOverride(value) }
-                            .setNegativeButton("Cancel", null)
-                            .show()
-                    }
-                }
+                setOnClickListener { showRadioLinkDialog() }
             }
-            overrideRow.addView(overrideCell("Auto", "auto", "Auto"))
-            overrideRow.addView(overrideCell("Force WiFi", "wifi", "WiFi"))
-            overrideRow.addView(overrideCell("Force LoRa", "lora", "LoRa"))
-            overrideRow.addView(overrideCell("Force FM", "fm", "FM"))
-            localBox.addView(overrideRow)
-            // A LINK THAT IS ONLY EVER A FALLBACK EARNS THE WARNING TINT, not
-            // the healthy one: being active on it at all means the preferred
-            // link is down.
-            localBox.addView(line(
-                "Active now: " + activeLabel +
-                    (if (override == "auto") " (chosen automatically)" else " (forced)") +
-                    (activeHealth?.optString("summary")?.takeIf { it.isNotEmpty() }
-                        ?.let { " -- $it" } ?: ""),
-                if (activeLink == "fm") COLOR_WARN else COLOR_IDLE
-            ))
+            chips.addView(b)
         }
+        chip("LoRa", "lora", loraBuilt)
+        chip("FM", "fm", fmBuilt)
+        // WiFi is an advanced link: its button only appears once it is on, or
+        // once advanced features are.
+        if (wifiBuilt || RadioLink.advancedEnabled(this)) chip("WiFi", "wifi", wifiBuilt)
+        localBox.addView(chips)
+        if (linkBlock != null && override != "auto") {
+            localBox.addView(line(
+                "Link forced to " + linkName(override) + ": automatic failover is off. Debug tab → Advanced " +
+                    "features → Auto turns it back on.",
+                COLOR_WARN))
+        }
+        renderOverrideButtons(override, linkBlock != null)
 
         val duty = status.optDouble("duty_pct", 0.0)
         val load = status.optDouble("channel_load_pct", -1.0)
