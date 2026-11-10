@@ -342,7 +342,7 @@ object RadioLink {
     }
 
     /** Advanced → Advanced features → "Show the Share tab". Off by default:
-     * the bottom bar then has four tabs. Share QR / Scan QR stay on Status. */
+     * the bottom bar then has four tabs. Share settings / Scan QR stay on Status. */
     private const val KEY_SHARE_TAB = "share_tab"
 
     fun shareTabEnabled(context: Context): Boolean =

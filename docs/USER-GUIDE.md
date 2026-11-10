@@ -195,7 +195,7 @@ The tab you use day to day.
   - [Passphrase](#passphrase)
   - [LoRa settings](#lora-settings-rnode)
   - [Radio link](#3-connecting-the-radio)
-  - **Share QR / Scan QR** ([section 11](#11-sharing-settings-with-a-team))
+  - **Share settings** (shows a QR code) / **Scan QR** ([section 11](#11-sharing-settings-with-a-team))
   - **Restart bridge**
   - **Quit app**, which stops the service fully
 
@@ -204,7 +204,7 @@ The tab you use day to day.
 Bench and field-test tools.
 
 - **Advanced features:** **Show advanced features** reveals:
-  - **Show the Share tab:** off by default. *Share QR* and *Scan QR* on the
+  - **Show the Share tab:** off by default. *Share settings* and *Scan QR* on the
     Status tab work either way. With the tab hidden, settings offers that
     arrive over Wi-Fi open as a dialog instead.
   - **Show detailed status on the Status tab:** off by default. When off, the
@@ -641,7 +641,7 @@ changes at once and nobody is left on the old settings
 
 **Ways to share**
 
-- **QR code:** *Status → Share QR* on the phone that is set up, then choose
+- **QR code:** *Status → Share settings* on the phone that is set up, then choose
   what to include. *Scan QR* on the others. A QR code that includes the
   passphrase gives the network key to anyone who photographs it.
 - **Over Wi-Fi:**

@@ -53,7 +53,7 @@ boards.
    Status tab matches on every phone.
 
 4. **Set the same radio settings on every phone:** *Status → LoRa settings*. The default
-   preset is Short Slow. Or set one phone up and share it: *Status → Share QR*
+   preset is Short Slow. Or set one phone up and share it: *Status → Share settings*
    on that phone, *Scan QR* on the others.
 
 5. **Point ATAK at the app.** In ATAK, go to *Settings → Network Preferences*
