@@ -463,7 +463,7 @@ class TestMarker(unittest.TestCase):
                              b'callsign="pixel" time="2026-08-04T09:55:58.000Z"/>',
                              b'<creator uid="ANDROID-0123456789abcdef" type="a-f-G-U-C" '
                              b'callsign="pixel" time="2026-08-04T08:55:58.000Z"/>')
-        self.assertIn(b'time="2026-08-04T08:55:58.000Z"', codec.decode(codec.encode(old)))
+        self.assertIn(b'time="2026-08-04T08:55:58.000Z"', codec.decode(codec.encode(old), now=NOW))
 
     def test_an_unknown_creator_attribute_goes_generic(self):
         src = MARKER.replace(b'<creator uid=', b'<creator surprise="1" uid=')
@@ -504,7 +504,7 @@ class TestMarker(unittest.TestCase):
     def test_link_round_trips_every_attribute(self):
         # Attribute ORDER is not preserved and does not need to be; the values
         # are what ATAK reads.
-        link = attrs(codec.decode(codec.encode(MARKER))).find("detail/link")
+        link = attrs(codec.decode(codec.encode(MARKER), now=NOW)).find("detail/link")
         self.assertEqual(link.get("uid"), "ANDROID-0123456789abcdef")
         self.assertEqual(link.get("type"), "a-f-G-U-C")
         self.assertEqual(link.get("relation"), "p-p")
@@ -2854,7 +2854,7 @@ class TestMarkerIdentifiersAndIcons(unittest.TestCase):
             raw = self._event(name)
             frame = codec.encode(raw)
             self.assertLessEqual(len(frame), ONE_PACKET_FM_B, name)
-            before, after = self._fields(raw), self._fields(codec.decode(frame))
+            before, after = self._fields(raw), self._fields(codec.decode(frame, now=NOW))
             # The creator's time loses its milliseconds on every path; that is
             # not what is under test here.
             for f in (before, after):
@@ -2879,7 +2879,7 @@ class TestMarkerIdentifiersAndIcons(unittest.TestCase):
         # 22:34:11Z + 5:30 is 04:04:11 on the 13th.
         raw = _real_marker("b-m-p-w-GOTO", "N.13.040411",
                            made="2026-10-12T22:34:11.998Z")
-        out = self._fields(codec.decode(codec.encode(raw)))
+        out = self._fields(codec.decode(codec.encode(raw), now=NOW))
         self.assertEqual(out["callsign"], "N.13.040411")
         raw = _real_marker("b-m-p-w-GOTO", "N.13.040411",
                            made="2026-10-12T22:34:11.998Z")
