@@ -48,13 +48,14 @@ boards.
    "always open"). For Bluetooth or a Meshtastic board, see
    [Connecting the radio](docs/USER-GUIDE.md#3-connecting-the-radio).
 
-3. **Set the same passphrase on every phone:** *Status → Passphrase*. There is
-   no default. Check that the four-character **Network key** fingerprint on the
-   Status tab matches on every phone.
+3. **Set the same network settings on every phone:** *Status → Network
+   settings* holds the passphrase, LoRa preset, frequency and power. There is
+   no default passphrase; the default preset is Short Slow. Or set one phone up
+   and share it: *Status → Share settings* on that phone, *Scan QR* on the
+   others.
 
-4. **Set the same radio settings on every phone:** *Status → LoRa settings*. The default
-   preset is Short Slow. Or set one phone up and share it: *Status → Share settings*
-   on that phone, *Scan QR* on the others.
+4. **Check they match:** the **Network key** line on the Status tab (key,
+   preset and frequency) must read the same on every phone.
 
 5. **Point ATAK at the app.** In ATAK, go to *Settings → Network Preferences*
    and add a server (streaming) connection: host `127.0.0.1`, port `7103`,

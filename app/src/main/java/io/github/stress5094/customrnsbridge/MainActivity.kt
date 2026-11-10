@@ -186,7 +186,6 @@ class MainActivity : AppCompatActivity() {
     /** After a shared change lands: labels that show settings are redrawn
      *  (the radio's and the Coverage picker's). */
     fun onSharedSettingsApplied() {
-        if (::linkButton.isInitialized) renderLink()
         if (::coveragePicker.isInitialized) updateCoveragePickerLabels()
     }
     // Chaquopy calls cross into the interpreter and can block on its GIL;
@@ -205,8 +204,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var surveyButton: Button
     private lateinit var rangeLine: TextView
     private lateinit var rangeButton: Button
-    private lateinit var linkButton: Button
     private lateinit var advancedBox: LinearLayout
+    private lateinit var audioBench: LinearLayout
     private lateinit var overrideNote: TextView
     private val overrideButtons = mutableListOf<Triple<String, String, Button>>()
     private lateinit var statusPage: View
@@ -828,7 +827,7 @@ class MainActivity : AppCompatActivity() {
                 "LoRa and FM. The receiver is always modelled as a handheld at 1.5 m, and other " +
                 "nodes' coverage keeps 1.5 m for their transmitter too. LoRa uses the " +
                 "radio in use: " + (coverageLoraSummary ?: "its preset, frequency and power") +
-                " — change those under LoRa settings (or on the Meshtastic board)."
+                " — change those under Network settings."
             textSize = 12f
             setTextColor(COLOR_IDLE)
             setPadding(0, dp(12), 0, 0)
@@ -1647,25 +1646,13 @@ class MainActivity : AppCompatActivity() {
             addView(cell(right, dp(4), 0))
         }
 
-        box.addView(row(
-            Ui.tonal(this, "Passphrase").apply {
-                setOnClickListener { showPassphraseDialog() }
-            },
-            Ui.tonal(this, "LoRa settings").apply {
-                setOnClickListener { showRadioDialog() }
-            }))
-
-        // Full width and labelled with the answer, not the question: which
-        // wire the radio is on is something you check at a glance before
-        // wondering why nothing is arriving. It sits with the settings rather
-        // than the measurements, and unlike "Radio" it is built entirely from
-        // Android's own state -- so it still opens when the bridge is dead,
-        // which is exactly when it is needed.
-        linkButton = Ui.outlined(this, "Radio link").apply {
-            setOnClickListener { showRadioLinkDialog() }
-        }
-        box.addView(linkButton)
-        renderLink()
+        // One button for everything that must match on every phone:
+        // passphrase, preset, frequency, power (operator, 2026-11-10). The
+        // radio link is opened from the link buttons above, or from the
+        // fallback button render() shows while the bridge is down.
+        box.addView(Ui.tonal(this, "Network settings").apply {
+            setOnClickListener { showNetworkSettings() }
+        })
         // Settings by QR code, the in-person case, both ways: show this
         // phone's, or scan another's. Everything else is on the Share tab.
         box.addView(row(Ui.outlined(this, "Share settings").apply {
@@ -1674,17 +1661,12 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener { shareUi.scanQr() }
         }))
 
-        // Its own row, and last. It takes the radio and ATAK down for a few
-        // seconds, so it should not sit where a thumb lands by accident.
-        box.addView(Ui.danger(this, "Restart bridge").apply {
-            setOnClickListener { confirmRestart() }
-        }.apply { (layoutParams as? LinearLayout.LayoutParams)?.topMargin = dp(10) })
-
-        // Below Restart, for the same reason Restart is last: it ends the whole
-        // run, so it is behind a confirmation and away from the thumb.
+        // Last, away from the thumb, behind a confirmation: it ends the whole
+        // run. Restart bridge moved to the Advanced tab (2026-11-10); the app
+        // still offers a restart by itself whenever a change needs one.
         box.addView(Ui.danger(this, "Quit app").apply {
             setOnClickListener { confirmQuit() }
-        })
+        }.apply { (layoutParams as? LinearLayout.LayoutParams)?.topMargin = dp(10) })
         return box
     }
 
@@ -1873,12 +1855,10 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener { toggleRangeTest() }
         }
         box.addView(row(surveyButton, rangeButton))
-        // Same idea as the log's Export: the CSV is app-private, and the
+        // No separate Export button (2026-11-10): stopping a range test saves
+        // the CSV to Downloads by itself. The CSV is app-private, and the
         // walking phone -- the one whose own GPS makes its distances the
         // trustworthy ones -- ends the walk out of adb range.
-        box.addView(full(Ui.outlined(this, "Export range test").apply {
-            setOnClickListener { exportRangeTest() }
-        }))
         rangeLine = TextView(this).apply {
             textSize = 13f
             setTextColor(COLOR_IDLE)
@@ -1910,12 +1890,26 @@ class MainActivity : AppCompatActivity() {
         // dependency on the FM stack, and it is how a VOX/threshold cable's
         // dial gets set against a steady signal instead of being judged off
         // single short bursts.
-        box.addView(sectionLabel("Audio bench"))
-        box.addView(sectionCaption(
+        // Only while FM is in use: the tone tests the FM cable.
+        audioBench = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = if (RadioLink.fmInUse(this@MainActivity)) View.VISIBLE else View.GONE
+        }
+        audioBench.addView(sectionLabel("Audio bench"))
+        audioBench.addView(sectionCaption(
             "Verify the cable's audio path, no mesh traffic"))
-        box.addView(full(Ui.outlined(this, "Test tone (10 s)").apply {
+        audioBench.addView(full(Ui.outlined(this, "Test tone (10 s)").apply {
             setOnClickListener { runTestTone() }
         }))
+        box.addView(audioBench)
+
+        // Moved from the Status tab (2026-11-10). Rarely needed by hand: the
+        // app offers a restart itself whenever a change needs one.
+        box.addView(sectionLabel("Bridge"))
+        box.addView(sectionCaption("Stops the radio, ATAK connection and mesh, then starts again"))
+        box.addView(Ui.danger(this, "Restart bridge").apply {
+            setOnClickListener { confirmRestart() }
+        })
 
         return box
     }
@@ -1940,10 +1934,6 @@ class MainActivity : AppCompatActivity() {
             else "Only one link is set up, so there is nothing to force."
     }
 
-    private fun renderLink() {
-        linkButton.text = "Radio link: " + RadioLink.label(this) +
-                if (RadioLink.pendingRestart(this)) "  (restart to apply)" else ""
-    }
 
     /**
      * The permissions are asked for here rather than in the bridge service
@@ -1961,7 +1951,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun openRadioLinkDialog() {
         RadioLinkDialog(this) { changed ->
-            renderLink()
+            // Redraw now so the link buttons show "(restart to apply)".
+            handler.removeCallbacks(refresh)
+            handler.post(refresh)
             // THE FM LINK CANNOT HEAR ANYTHING WITHOUT RECORD_AUDIO, and only
             // an Activity can ask -- FmAudioBridgeService logs the refusal
             // explicitly because otherwise it presents as "No audio" on the
@@ -2146,18 +2138,190 @@ class MainActivity : AppCompatActivity() {
      * settings on every node so they can be read side by side, which is the
      * only quick way to tell "misconfigured" from "broken".
      */
-    private fun showRadioDialog() {
-        // A Meshtastic board has its own settings (region, preset, channel and
-        // key...), none of which the RNode screen below can change.
-        if (RadioLink.isMeshtastic(this)) {
-            MeshBoardDialog(
-                this,
-                { method, args -> callPython(method, *args) },
-                onEditAppRadio = { showAppRadioDialog() }
-            ).show()
-            return
+    /**
+     * Network settings (operator, 2026-11-10): passphrase, preset, frequency
+     * and power in one dialog -- the things every phone must match. Replaces
+     * the separate Passphrase and LoRa settings dialogs.
+     *
+     * THE PASSPHRASE IS MASKED, WITH AN EYE TO SHOW IT. It is a group secret
+     * that has to be read out or copied onto other phones, so it must stay
+     * readable on demand -- but not by default, on a screen someone else can
+     * see. (It used to be shown in plain text whenever the dialog opened.)
+     */
+    private fun showNetworkSettings() {
+        executor.execute {
+            val config = try {
+                JSONObject(callPython("get_radio_config") ?: "{}")
+                    .takeIf { it.has("presets") }
+            } catch (e: Exception) {
+                null
+            }
+            val current = callPython("get_mesh_passphrase") ?: ""
+            handler.post {
+                if (config == null) {
+                    Toast.makeText(this, "Network settings are unavailable until the " +
+                        "bridge is running", Toast.LENGTH_LONG).show()
+                } else {
+                    buildNetworkDialog(config, current)
+                }
+            }
         }
-        showAppRadioDialog()
+    }
+
+    private fun buildNetworkDialog(config: JSONObject, currentPassphrase: String) {
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(12), dp(24), 0)
+        }
+        layout.addView(fieldHeading("Passphrase", top = 0))
+        val passBox = com.google.android.material.textfield.TextInputLayout(this).apply {
+            endIconMode = com.google.android.material.textfield.TextInputLayout.END_ICON_PASSWORD_TOGGLE
+        }
+        val passField = com.google.android.material.textfield.TextInputEditText(passBox.context).apply {
+            // No setSingleLine() here: it swaps the password masking for a
+            // single-line transformation and the text shows in clear. A
+            // password field is single-line already. (Caught on the phone,
+            // 2026-11-10.)
+            maxLines = 1
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD or
+                InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            hint = "shared passphrase"
+            setText(currentPassphrase)
+        }
+        passBox.addView(passField)
+        layout.addView(passBox)
+        val passNote = TextView(this).apply {
+            text = "Tap the eye to show it. A new passphrase starts a new network: " +
+                "every phone needs the same one."
+            textSize = 12f
+            setTextColor(COLOR_IDLE)
+        }
+        layout.addView(passNote)
+        // Next to the field rather than a third dialog button: three buttons
+        // stack on a phone and the third falls off the bottom.
+        val newPassButton = Ui.textButton(this, "New passphrase")
+        layout.addView(newPassButton)
+
+        val readRadio = addRadioFields(layout, config)
+
+        if (RadioLink.isMeshtastic(this)) {
+            layout.addView(Ui.outlined(this, "Meshtastic board settings…").apply {
+                setOnClickListener {
+                    MeshBoardDialog(
+                        this@MainActivity,
+                        { method, args -> callPython(method, *args) },
+                        onEditAppRadio = { showAppRadioDialog() }
+                    ).show()
+                }
+            })
+        }
+        layout.addView(TextView(this).apply {
+            text = "Every phone must match all of these: compare the Network key line " +
+                "on the Status tab. The frequency must be legal where you are."
+            textSize = 12f
+            setTextColor(COLOR_IDLE)
+            setPadding(0, dp(12), 0, 0)
+        })
+
+        val dialog = MaterialAlertDialogBuilder(this)
+            .setTitle("Network settings")
+            .setView(ScrollView(this).apply { addView(layout) })
+            .setPositiveButton("Apply", null)     // wired below so it can stay open
+            .setNegativeButton("Cancel", null)
+            .create()
+        dialog.setOnShowListener {
+            // Fills the field only; Apply still has to be pressed, so a stray
+            // tap cannot re-key a phone off its team.
+            newPassButton.setOnClickListener {
+                executor.execute {
+                    val made = callPython("generate_mesh_passphrase")
+                    handler.post {
+                        if (made.isNullOrEmpty()) {
+                            Toast.makeText(this, "Could not make a passphrase",
+                                Toast.LENGTH_LONG).show()
+                        } else {
+                            passField.setText(made)
+                            passField.setSelection(made.length)
+                            passNote.text = "New passphrase filled in (tap the eye to read " +
+                                "it). Apply starts a new network: every other phone needs " +
+                                "these same words, typed or shared by QR code."
+                        }
+                    }
+                }
+            }
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val entered = passField.text.toString().trim()
+                if (entered.isEmpty()) {
+                    // An empty passphrase derives a valid key every install
+                    // shares: worse than none, because it looks like encryption.
+                    passBox.error = "Cannot be empty"
+                    return@setOnClickListener
+                }
+                dialog.dismiss()
+                if (entered != currentPassphrase) applyPassphrase(entered)
+                readRadio()?.let { (preset, freq, power) -> applyRadio(preset, freq, power) }
+            }
+        }
+        dialog.show()
+    }
+
+    private fun fieldHeading(text: String, top: Int = 12) = TextView(this).apply {
+        this.text = text
+        textSize = 12f
+        setTextColor(COLOR_HEADING)
+        setPadding(0, dp(top), 0, 0)
+    }
+
+    /**
+     * Preset, frequency and power fields, added to [layout]. Returns a reader
+     * giving (preset, frequency, power) when any of them changed, else null --
+     * so Apply only touches the radio when the operator changed it.
+     */
+    private fun addRadioFields(layout: LinearLayout, config: JSONObject): () -> Triple<String, String, String>? {
+        val presetsJson = config.optJSONArray("presets")
+        val presets = (0 until (presetsJson?.length() ?: 0))
+            .map { presetsJson!!.optString(it) }
+        // Shown instead of the bare names, and indexed identically: the value
+        // sent back is still `presets[position]`. Falls back to the names if an
+        // older bridge does not supply labels.
+        val labelsJson = config.optJSONArray("preset_labels")
+        val presetLabels = (0 until (labelsJson?.length() ?: 0))
+            .map { labelsJson!!.optString(it) }
+            .takeIf { it.size == presets.size } ?: presets
+        // A list rather than free entry: spreading factor, bandwidth and coding
+        // rate only make sense as a set. The names are Meshtastic's.
+        layout.addView(fieldHeading("LoRa preset"))
+        val presetSpinner = Spinner(this).apply {
+            adapter = ArrayAdapter(
+                this@MainActivity, android.R.layout.simple_spinner_dropdown_item,
+                presetLabels)
+            setSelection(presets.indexOf(config.optString("preset")).coerceAtLeast(0))
+        }
+        layout.addView(presetSpinner)
+        layout.addView(fieldHeading("Frequency (MHz)"))
+        val freq0 = config.optString("frequency_mhz")
+        val freqField = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            setSingleLine()
+            setText(freq0)
+        }
+        layout.addView(freqField)
+        // From Python: 37 for an RNode, 30 for a Meshtastic board.
+        layout.addView(fieldHeading("Transmit power (dBm, max ${config.optInt("txpower_max_dbm", 37)})"))
+        val power0 = config.optInt("txpower_dbm").toString()
+        val powerField = EditText(this).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER
+            setSingleLine()
+            setText(power0)
+        }
+        layout.addView(powerField)
+        return {
+            val preset = presets.getOrElse(presetSpinner.selectedItemPosition) { "" }
+            val freq = freqField.text.toString().trim()
+            val power = powerField.text.toString().trim()
+            if (preset == config.optString("preset") && freq == freq0 && power == power0) null
+            else Triple(preset, freq, power)
+        }
     }
 
     /**
@@ -2182,68 +2346,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** Radio fields alone -- opened from the Meshtastic board dialog's
+     *  "App's radio settings", which are the source of its managed profile. */
     private fun buildRadioDialog(config: JSONObject): AlertDialog {
-        val presetsJson = config.optJSONArray("presets")
-        val presets = (0 until (presetsJson?.length() ?: 0))
-            .map { presetsJson!!.optString(it) }
-        // Shown instead of the bare names, and indexed identically: the value
-        // sent back is still `presets[position]`, so the label is free to say
-        // whatever helps without ever becoming the stored setting. Falls back
-        // to the names if an older bridge does not supply them.
-        val labelsJson = config.optJSONArray("preset_labels")
-        val presetLabels = (0 until (labelsJson?.length() ?: 0))
-            .map { labelsJson!!.optString(it) }
-            .takeIf { it.size == presets.size } ?: presets
-
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(24), dp(12), dp(24), 0)
         }
-
-        // A list rather than free entry: spreading factor, bandwidth and
-        // coding rate only make sense as a set, and letting them be picked
-        // independently is how a node ends up on a combination nothing else
-        // in the world uses. The names are Meshtastic's.
-        layout.addView(TextView(this).apply {
-            text = "Preset"
-            textSize = 12f
-            setTextColor(COLOR_HEADING)
-        })
-        val presetSpinner = Spinner(this).apply {
-            adapter = ArrayAdapter(
-                this@MainActivity, android.R.layout.simple_spinner_dropdown_item,
-                presetLabels)
-            setSelection(presets.indexOf(config.optString("preset")).coerceAtLeast(0))
-        }
-        layout.addView(presetSpinner)
-
-        layout.addView(TextView(this).apply {
-            text = "Frequency (MHz)"
-            textSize = 12f
-            setTextColor(COLOR_HEADING)
-            setPadding(0, dp(12), 0, 0)
-        })
-        val freqField = EditText(this).apply {
-            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-            setSingleLine()
-            setText(config.optString("frequency_mhz"))
-        }
-        layout.addView(freqField)
-
-        layout.addView(TextView(this).apply {
-            // From Python: 37 for an RNode, 30 for a Meshtastic board.
-            text = "TX power (dBm, max ${config.optInt("txpower_max_dbm", 37)})"
-            textSize = 12f
-            setTextColor(COLOR_HEADING)
-            setPadding(0, dp(12), 0, 0)
-        })
-        val powerField = EditText(this).apply {
-            inputType = InputType.TYPE_CLASS_NUMBER
-            setSingleLine()
-            setText(config.optInt("txpower_dbm").toString())
-        }
-        layout.addView(powerField)
-
+        val readRadio = addRadioFields(layout, config)
         layout.addView(TextView(this).apply {
             text = "Every node must match. Must be legal where you are — " +
                     "receiving is not transmitting."
@@ -2251,15 +2361,11 @@ class MainActivity : AppCompatActivity() {
             setTextColor(COLOR_IDLE)
             setPadding(0, dp(12), 0, 0)
         })
-
         return MaterialAlertDialogBuilder(this)
-            .setTitle("LoRa settings")
+            .setTitle("Radio settings")
             .setView(layout)
             .setPositiveButton("Apply") { _, _ ->
-                applyRadio(
-                    presets.getOrElse(presetSpinner.selectedItemPosition) { "" },
-                    freqField.text.toString().trim(),
-                    powerField.text.toString().trim())
+                readRadio()?.let { (preset, freq, power) -> applyRadio(preset, freq, power) }
             }
             .setNegativeButton("Cancel", null)
             .create()
@@ -2323,10 +2429,14 @@ class MainActivity : AppCompatActivity() {
                 .optBoolean("running")
             val reply = if (running) callPython("stop_range_test")
                         else callPython("start_range_test")
+            // Stopping saves the CSV to Downloads straight away -- it is what
+            // every stopped test was followed by, and it cannot be forgotten.
+            val saved = if (running) LogRecorder.exportRangeTest(applicationContext) else null
             handler.post {
                 Toast.makeText(
                     this,
-                    if (running) "Range test stopped — $reply"
+                    if (running) "Range test stopped — $reply. " +
+                        (saved?.let { "Saved to $it" } ?: "Nothing to save")
                     else if (reply.isNullOrEmpty()) "Could not start the range test"
                     else "Recording to $reply",
                     Toast.LENGTH_LONG
@@ -2400,19 +2510,6 @@ class MainActivity : AppCompatActivity() {
      * Copies the newest range test CSV to Downloads. Safe mid-test: every row
      * is flushed as it is written, so the copy holds everything heard so far.
      */
-    private fun exportRangeTest() {
-        Toast.makeText(this, "Exporting range test…", Toast.LENGTH_SHORT).show()
-        executor.execute {
-            val where = LogRecorder.exportRangeTest(applicationContext)
-            handler.post {
-                Toast.makeText(
-                    this,
-                    where?.let { "Saved to $it" } ?: "No range test to export",
-                    Toast.LENGTH_LONG
-                ).show()
-            }
-        }
-    }
 
     /**
      * Red when it is off, because a test with no log is otherwise discovered
@@ -2432,89 +2529,6 @@ class MainActivity : AppCompatActivity() {
             else -> "Log NOT being recorded"
         }
         logLine.setTextColor(if (recording) COLOR_IDLE else COLOR_DOWN)
-    }
-
-    /**
-     * Shows the current passphrase rather than masking it.
-     *
-     * Masking would be the reflex, and it would be wrong here: this is a
-     * *group* secret whose entire purpose is to be copied onto the other
-     * radios, so a field you cannot read is a field you cannot provision from.
-     * It is already stored in plaintext in app-private storage, so hiding it
-     * on screen protects nothing and costs the one workflow that matters.
-     */
-    private fun showPassphraseDialog() {
-        val field = EditText(this).apply {
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-            setSingleLine()
-            hint = "shared passphrase"
-        }
-        val note = TextView(this).apply {
-            text = "Every node on this network needs the same passphrase. " +
-                    "After setting it, check that the key shown on each device matches."
-            textSize = 12f
-            setTextColor(COLOR_IDLE)
-            setPadding(0, dp(8), 0, 0)
-        }
-        val body = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(24), dp(16), dp(24), 0)
-            addView(field)
-            addView(note)
-        }
-
-        val dialog = MaterialAlertDialogBuilder(this)
-            .setTitle("Network passphrase")
-            .setView(body)
-            .setPositiveButton("Set", null)   // wired below so it can stay open
-            .setNegativeButton("Cancel", null)
-            .setNeutralButton("Generate", null)   // likewise: fills the field, sets nothing
-            .create()
-
-        dialog.setOnShowListener {
-            // Six random everyday words (passphrase_gen): readable aloud and
-            // typeable on another phone, 62 bits before the key derivation.
-            // Only put in the field -- Set still has to be pressed, so a stray
-            // tap cannot re-key a phone off its team.
-            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
-                executor.execute {
-                    val made = callPython("generate_mesh_passphrase")
-                    handler.post {
-                        if (made.isNullOrEmpty()) {
-                            Toast.makeText(this, "Could not make a passphrase",
-                                Toast.LENGTH_LONG).show()
-                        } else {
-                            field.setText(made)
-                            field.setSelection(made.length)
-                            note.text = "A new passphrase starts a new network: every other " +
-                                "phone needs these same words, typed or shared by QR code. " +
-                                "Then check that the key shown on each device matches."
-                        }
-                    }
-                }
-            }
-            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                val entered = field.text.toString().trim()
-                if (entered.isEmpty()) {
-                    // Refused rather than accepted-as-blank: an empty
-                    // passphrase would derive a perfectly valid key that every
-                    // install shares, which is worse than no encryption because
-                    // it looks like encryption.
-                    field.error = "Cannot be empty"
-                    return@setOnClickListener
-                }
-                dialog.dismiss()
-                applyPassphrase(entered)
-            }
-        }
-        dialog.show()
-
-        // Prefilled off the interpreter thread -- derive/read crosses into
-        // Python, and the dialog should appear immediately either way.
-        executor.execute {
-            val current = callPython("get_mesh_passphrase") ?: ""
-            handler.post { if (current.isNotEmpty()) field.setText(current) }
-        }
     }
 
     private fun applyPassphrase(passphrase: String) {
@@ -2692,10 +2706,12 @@ class MainActivity : AppCompatActivity() {
         // is not. Same for which wire the radio is on -- that line is at its
         // most useful on a screen that is otherwise reporting nothing.
         renderLog()
-        renderLink()
+        if (::audioBench.isInitialized) audioBench.visibility =
+            if (RadioLink.fmInUse(this)) View.VISIBLE else View.GONE
 
         if (json == null) {
             localBox.addView(line("Starting bridge…", COLOR_IDLE))
+            addRadioLinkFallback()
             hideSections()
             return
         }
@@ -2704,12 +2720,14 @@ class MainActivity : AppCompatActivity() {
             JSONObject(json)
         } catch (e: Exception) {
             localBox.addView(line("Bad status payload: ${e.message}", COLOR_DOWN))
+            addRadioLinkFallback()
             hideSections()
             return
         }
 
         if (!status.optBoolean("ok", false)) {
             localBox.addView(line("Bridge error: ${status.optString("error")}", COLOR_DOWN))
+            addRadioLinkFallback()
             hideSections()
             return
         }
@@ -2766,7 +2784,7 @@ class MainActivity : AppCompatActivity() {
                 localBox.addView(line(
                     "The board is not on this app's settings ($differs " +
                         (if (differs == 1) "difference" else "differences") +
-                        ") - LoRa settings → Use the app's settings",
+                        ") - Network settings → Meshtastic board → Use the app's settings",
                     COLOR_WARN
                 ))
             }
@@ -2816,7 +2834,13 @@ class MainActivity : AppCompatActivity() {
         // identical from here and claiming either would be a guess, while
         // "Garbled" IS a fault -- the link is provably carrying signal and
         // provably delivering none of it.
-        if (fmHealth != null) {
+        // The first pill is the radio CARRYING traffic (operator, 2026-11-10):
+        // it used to show FM's receive state whenever FM backup was on, so a
+        // healthy LoRa node with no FM cable plugged in led with a red "No
+        // audio". FM's state now rides on the FM link button below.
+        val activeNow = status.optJSONObject("link")?.optString("active_link")
+            ?: if (RadioLink.isFm(this)) "fm" else "lora"
+        if (fmHealth != null && activeNow == "fm") {
             val fmState = fmHealth.optString("state")
             strip.addView(pill(
                 when (fmState) {
@@ -2983,7 +3007,19 @@ class MainActivity : AppCompatActivity() {
         val override = linkBlock?.optString("link_override", "auto") ?: "auto"
         val chips = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(0, dp(4), 0, dp(4))
+            setPadding(0, 0, 0, dp(4))
+        }
+        localBox.addView(line("Links · tap to change" +
+                if (RadioLink.pendingRestart(this)) "  ·  restart to apply" else "",
+            if (RadioLink.pendingRestart(this)) COLOR_WARN else COLOR_IDLE))
+        // FM's receive state, in a word, on the FM button itself.
+        val fmWord = when (fm?.optJSONObject("health")?.optString("state")) {
+            "hearing" -> "hearing"
+            "garbled" -> "garbled"
+            "quiet" -> null
+            "deaf" -> "silent"
+            "down" -> "no audio"
+            else -> null
         }
         fun chip(name: String, link: String, built: Boolean) {
             val active = built && link == activeLink
@@ -2992,10 +3028,12 @@ class MainActivity : AppCompatActivity() {
                 built -> "backup"
                 else -> "off"
             }
-            val b = if (active) Ui.filled(this, "$name · $state")
-                    else Ui.outlined(this, "$name · $state")
+            val extra = if (link == "fm" && built && fmWord != null) " · $fmWord" else ""
+            val b = if (active) Ui.filled(this, "$name · $state$extra")
+                    else Ui.outlined(this, "$name · $state$extra")
             b.apply {
                 textSize = 12f
+                maxLines = 2
                 minWidth = 0
                 minimumWidth = 0
                 setPadding(dp(4), paddingTop, dp(4), paddingBottom)
@@ -3049,8 +3087,10 @@ class MainActivity : AppCompatActivity() {
         // Above the channel conditions: what the radio is SET to has to be
         // readable next to what it is HEARING, and the setting is the one you
         // compare against the other phone.
+        // The full radio line only with detailed status: its preset and
+        // frequency, the parts to compare, are on the key line below.
         val radioLine = status.optString("radio")
-        if (radioLine.isNotEmpty()) localBox.addView(line(radioLine, COLOR_IDLE))
+        if (details && radioLine.isNotEmpty()) localBox.addView(line(radioLine, COLOR_IDLE))
 
         // Demoted, not deleted. The channel line and the tx-policy counters are
         // the two most useful things on this screen when something is wrong and
@@ -3060,7 +3100,7 @@ class MainActivity : AppCompatActivity() {
         val channel = status.optString("channel")
         val policy = status.optString("policy")
         val detail = listOf(channel, policy).filter { it.isNotEmpty() }
-        if (detail.isNotEmpty()) {
+        if (details && detail.isNotEmpty()) {
             val body = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 visibility = if (diagnosticsOpen) View.VISIBLE else View.GONE
@@ -3131,7 +3171,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         val mismatch = sinceAccept >= MISMATCH_FRAMES
+        // What must match on every phone, on one line: the key, then the
+        // preset and frequency (the first two parts of the radio line).
+        val radioShort = status.optString("radio").split("·")
+            .map { it.trim() }.filter { it.isNotEmpty() }.take(2).joinToString(" · ")
         val detail = StringBuilder("Network key $key")
+        if (radioShort.isNotEmpty()) detail.append("  ·  $radioShort")
         if (mismatch) {
             // Names the likely cause rather than reporting a number, because
             // "2 rejected" reads as trivia and "check the passphrase" is the
@@ -3143,6 +3188,17 @@ class MainActivity : AppCompatActivity() {
         }
         keyLine.text = detail.toString()
         keyLine.setTextColor(if (mismatch) COLOR_DOWN else COLOR_IDLE)
+    }
+
+    /** While the bridge is not reporting there are no link buttons to tap,
+     *  and a wrong radio link is a common reason it is not -- so the dialog
+     *  stays one tap away. It is built from Android's own state, so it opens
+     *  with the bridge down. */
+    private fun addRadioLinkFallback() {
+        localBox.addView(Ui.outlined(this, "Radio link: " + RadioLink.label(this) +
+                if (RadioLink.pendingRestart(this)) "  (restart to apply)" else "").apply {
+            setOnClickListener { showRadioLinkDialog() }
+        })
     }
 
     private fun hideSections() {

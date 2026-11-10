@@ -199,9 +199,13 @@ class TestKinds(unittest.TestCase):
         self.assertEqual(len(kinds), len(set(kinds)))
         self.assertEqual(set(kinds), {"rnode", "meshtastic", "fm", "wifi"})
 
-    def test_the_view_carries_the_legend(self):
-        self.assertEqual([k["kind"] for k in build([])["kinds"]],
-                         [k for k, _, _ in mesh_view.KINDS])
+    def test_the_legend_lists_only_the_radios_in_use(self):
+        # This phone has RNode and FM: no Meshtastic or WiFi entry.
+        self.assertEqual([k["kind"] for k in build([])["kinds"]], ["rnode", "fm"])
+
+    def test_a_peer_heard_on_another_radio_adds_it_to_the_legend(self):
+        view = build([peer("bbbbbb", [radio_row("wifi")])])
+        self.assertEqual([k["kind"] for k in view["kinds"]], ["rnode", "fm", "wifi"])
 
 
 if __name__ == "__main__":

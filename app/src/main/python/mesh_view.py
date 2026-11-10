@@ -158,7 +158,10 @@ def build(me, peers, connected_s, beacon_interval_s, probable=None):
         "nodes": nodes,
         "lines": lines,
         "probable": [{"a": a, "b": b} for a, b in pairs],
-        "kinds": [{"kind": k, "label": l, "tag": t} for k, l, t in KINDS],
+        # Only the radio types in this picture -- this phone's own and any a
+        # peer is heard on -- so a LoRa-only team is not shown an FM legend.
+        "kinds": [{"kind": k, "label": l, "tag": t} for k, l, t in KINDS
+                  if k in set(me.get("radios") or []) | {ln.get("radio") for ln in lines}],
     }
 
 

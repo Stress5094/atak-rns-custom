@@ -2161,7 +2161,7 @@ def _build_mesh_interface():
             RNS.log("[cot-bridge] BOARD WARNING: %s" % warning, RNS.LOG_WARNING)
         if status.get("profile_changes"):
             RNS.log("[cot-bridge] BOARD PROFILE: the board differs from the app's "
-                    "settings (%s); LoRa settings -> Use the app's settings applies them"
+                    "settings (%s); Network settings > Meshtastic board > Use the app's settings applies them"
                     % "; ".join(status["profile_changes"]), RNS.LOG_WARNING)
         elif status.get("profile_problem"):
             RNS.log("[cot-bridge] BOARD PROFILE: cannot compare with the app's "

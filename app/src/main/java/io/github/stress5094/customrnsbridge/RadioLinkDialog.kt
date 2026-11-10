@@ -98,7 +98,7 @@ class RadioLinkDialog(
     // from the STORED choice, not the effective one, so a value saved before a
     // trip through FM is still there when LoRa comes back.
     private var meshtastic = RadioLink.storedRadioFirmware(activity) == RadioLink.RADIO_MESHTASTIC
-    private lateinit var meshtasticCheckbox: CheckBox
+    private lateinit var connectionSection: View
 
     // The FM tone placement. Shown whenever FM could carry traffic at all (as
     // the transport itself, or as backup), hidden otherwise -- on a LoRa-only
@@ -175,29 +175,6 @@ class RadioLinkDialog(
         // searches, so the lookup silently fails and the old button is
         // never unchecked. Found by hand while adding the third (FM) button:
         // tapping it left BOTH it and "USB cable" showing checked.
-        val group = RadioGroup(activity).apply { orientation = RadioGroup.VERTICAL }
-        val usbButton = RadioButton(activity).apply {
-            id = View.generateViewId()
-            text = "USB cable"
-            isChecked = transport == RadioLink.TRANSPORT_USB
-        }
-        val bleButton = RadioButton(activity).apply {
-            id = View.generateViewId()
-            text = "Bluetooth"
-            isChecked = transport == RadioLink.TRANSPORT_BLE
-        }
-        // The FM/codec2 audio link instead of a KISS-speaking radio -- see
-        // FmAudioBridgeService/fm_link.py. No pairing or scanning of its own,
-        // so it needs none of the Bluetooth section below; the USB cable
-        // carries the radio's audio the same way it already carries an
-        // RNode's serial.
-        val fmButton = RadioButton(activity).apply {
-            id = View.generateViewId()
-            text = "FM audio (USB)"
-            isChecked = transport == RadioLink.TRANSPORT_FM
-        }
-        // One tap from cable to Bluetooth (BluetoothSetup). Offered only while
-        // an RNode is running on the cable, because every step goes over it.
         if (RadioLink.transport(activity) == RadioLink.TRANSPORT_USB &&
             !RadioLink.isMeshtastic(activity) && !RadioLink.pendingRestart(activity)) {
             body.addView(Ui.filled(activity, "Switch to Bluetooth").apply {
@@ -219,49 +196,92 @@ class RadioLinkDialog(
                 setPadding(0, dp(2), 0, dp(10))
             })
         }
-        group.addView(usbButton)
-        group.addView(bleButton)
-        group.addView(fmButton)
-        group.setOnCheckedChangeListener { _, checked ->
-            transport = when (checked) {
-                bleButton.id -> RadioLink.TRANSPORT_BLE
-                fmButton.id -> RadioLink.TRANSPORT_FM
-                else -> RadioLink.TRANSPORT_USB
-            }
+        // Two questions, each asked once (operator, 2026-11-10): WHICH radio,
+        // then HOW it is connected. They used to be one list (USB / Bluetooth
+        // / FM audio) plus a separate "Meshtastic firmware" checkbox. Stored
+        // exactly as before: transport usb/ble/fm, plus the firmware flag.
+        //
+        // Every RadioButton needs its own explicit id: RadioGroup unchecks the
+        // previous choice through findViewById(), which silently does nothing
+        // at the default NO_ID and leaves two buttons checked.
+        fun choice(label: String, checked: Boolean) = RadioButton(activity).apply {
+            id = View.generateViewId()
+            text = label
+            isChecked = checked
+        }
+        fun heading(text: String) = TextView(activity).apply {
+            this.text = text
+            textSize = 12f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(COLOR_IDLE)
+            setPadding(0, dp(8), 0, 0)
+        }
+        var connection = if (transport == RadioLink.TRANSPORT_BLE) RadioLink.TRANSPORT_BLE
+                         else RadioLink.TRANSPORT_USB
+
+        body.addView(heading("Radio"))
+        val radioGroup = RadioGroup(activity).apply { orientation = RadioGroup.VERTICAL }
+        val rnodeButton = choice("RNode (LoRa)",
+            transport != RadioLink.TRANSPORT_FM && !meshtastic)
+        val meshButton = choice("Meshtastic board (LoRa)",
+            transport != RadioLink.TRANSPORT_FM && meshtastic)
+        val fmOnlyButton = choice("FM radio only, through a USB sound card",
+            transport == RadioLink.TRANSPORT_FM)
+        radioGroup.addView(rnodeButton)
+        radioGroup.addView(meshButton)
+        radioGroup.addView(fmOnlyButton)
+        body.addView(radioGroup)
+
+        val connectionGroup = RadioGroup(activity).apply { orientation = RadioGroup.VERTICAL }
+        val usbButton = choice("USB cable", connection == RadioLink.TRANSPORT_USB)
+        val bleButton = choice("Bluetooth", connection == RadioLink.TRANSPORT_BLE)
+        connectionGroup.addView(usbButton)
+        connectionGroup.addView(bleButton)
+        connectionSection = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(heading("Connection"))
+            addView(connectionGroup)
+            visibility = if (transport == RadioLink.TRANSPORT_FM) View.GONE else View.VISIBLE
+        }
+        body.addView(connectionSection)
+
+        fun refreshSections() {
+            val fmOnly = transport == RadioLink.TRANSPORT_FM
+            connectionSection.visibility = if (fmOnly) View.GONE else View.VISIBLE
             bluetoothSection.visibility =
                 if (transport == RadioLink.TRANSPORT_BLE) View.VISIBLE else View.GONE
-            meshtasticCheckbox.visibility =
-                if (transport == RadioLink.TRANSPORT_FM) View.GONE else View.VISIBLE
-            // Only meaningful alongside USB/BLE -- FM chosen as the transport
-            // itself has no LoRa to back up.
-            fmBackupCheckbox.visibility =
-                if (transport == RadioLink.TRANSPORT_FM) View.GONE else View.VISIBLE
+            fmBackupCheckbox.visibility = if (fmOnly) View.GONE else View.VISIBLE
             toneProfileSection.visibility =
                 if (fmInUse() && advanced) View.VISIBLE else View.GONE
         }
-        body.addView(group)
-
-        // Which firmware is on the board behind the USB cable. A checkbox and
-        // not a fourth radio button: it is not another way of reaching the
-        // radio, it is what the radio IS, and it only exists for USB.
-        meshtasticCheckbox = com.google.android.material.checkbox.MaterialCheckBox(activity).apply {
-            text = "The board runs Meshtastic firmware (not RNode)"
-            isChecked = meshtastic
-            visibility = if (transport == RadioLink.TRANSPORT_FM) View.GONE else View.VISIBLE
-            setOnCheckedChangeListener { _, checked ->
-                meshtastic = checked
-                // A radio chosen as the other kind is not a choice any more:
-                // connecting to an RNode as a Meshtastic board (or back) finds
-                // the wrong service and retries forever.
-                val chosen = chosenAddress
-                if (chosen != null && chosen in found && (chosen in meshFound) != checked) {
-                    chosenAddress = null
-                    chosenName = null
+        radioGroup.setOnCheckedChangeListener { _, checked ->
+            when (checked) {
+                fmOnlyButton.id -> transport = RadioLink.TRANSPORT_FM
+                else -> {
+                    transport = connection
+                    val wantMesh = checked == meshButton.id
+                    if (wantMesh != meshtastic) {
+                        meshtastic = wantMesh
+                        // A radio chosen as the other kind is not a choice any
+                        // more: connecting to an RNode as a Meshtastic board (or
+                        // back) finds the wrong service and retries forever.
+                        val chosen = chosenAddress
+                        if (chosen != null && chosen in found && (chosen in meshFound) != wantMesh) {
+                            chosenAddress = null
+                            chosenName = null
+                        }
+                        renderDevices()
+                    }
                 }
-                renderDevices()
             }
+            refreshSections()
         }
-        body.addView(meshtasticCheckbox)
+        connectionGroup.setOnCheckedChangeListener { _, checked ->
+            connection = if (checked == bleButton.id) RadioLink.TRANSPORT_BLE
+                         else RadioLink.TRANSPORT_USB
+            if (transport != RadioLink.TRANSPORT_FM) transport = connection
+            refreshSections()
+        }
 
         // LoRa-primary/FM-backup routing: FM stays attached and keeps
         // listening even while LoRa is carrying traffic, and the bridge fails
@@ -651,22 +671,20 @@ class RadioLinkDialog(
         if (!::deviceBox.isInitialized) return
         deviceBox.removeAllViews()
 
-        // The zero-configuration case, kept as an explicit choice rather than
-        // an implicit one: a phone that has only ever been paired with one
-        // radio should not need this screen at all, and this row says so.
-        // RNode only -- see BleSerialBridgeService.chooseDevice().
-        if (!meshtastic) deviceBox.addView(deviceRow(
-            label = "Use the only paired radio",
-            detail = "Fine until a second RNode is paired with this phone",
-            selected = chosenAddress == null,
-            bonded = true,
-        ) {
-            chosenAddress = null
-            chosenName = null
-            renderDevices()
-        })
-
         val shown = shownDevices()
+        // One paired radio and nothing chosen: that is the radio (replaces the
+        // old "Use the only paired radio" row, 2026-11-10). With several, the
+        // operator picks; save() insists.
+        if (chosenAddress == null) {
+            val paired = shown.keys.filter {
+                try { adapter?.getRemoteDevice(it)?.bondState == BluetoothDevice.BOND_BONDED }
+                catch (e: Exception) { false }
+            }
+            if (paired.size == 1) {
+                chosenAddress = paired[0]
+                chosenName = shown[paired[0]]
+            }
+        }
         if (shown.isEmpty()) {
             deviceBox.addView(TextView(activity).apply {
                 text = if (meshtastic)
@@ -987,10 +1005,11 @@ class RadioLinkDialog(
             ).show()
             return
         }
-        if (transport == RadioLink.TRANSPORT_BLE && chosenAddress == null && found.isEmpty()) {
+        if (transport == RadioLink.TRANSPORT_BLE && chosenAddress == null) {
             Toast.makeText(
                 activity,
-                "No paired radio to fall back on — pick one, or pair one first",
+                if (found.isEmpty()) "No radio paired yet — scan and pair one first"
+                else "Pick which radio to use",
                 Toast.LENGTH_LONG
             ).show()
             return

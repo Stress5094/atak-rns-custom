@@ -314,11 +314,15 @@ class TestKotlinAndPythonAgree(unittest.TestCase):
         for name in called:
             self.assertTrue(callable(getattr(rns_bridge, name, None)), name)
 
-    def test_the_radio_button_opens_the_board_dialog_for_a_meshtastic_board(self):
+    def test_network_settings_reaches_the_board_dialog_for_a_meshtastic_board(self):
+        # Since 2026-11-10 the board dialog is opened from Network settings
+        # (which replaced the separate Radio / LoRa settings button).
         src = self.read("MainActivity.kt")
-        i = src.index("private fun showRadioDialog()")
-        self.assertIn("RadioLink.isMeshtastic(this)", src[i:i + 400])
-        self.assertIn("MeshBoardDialog(", src[i:i + 400])
+        i = src.index("private fun buildNetworkDialog(")
+        j = src.index("\n    private fun ", i + 10)
+        body = src[i:j]
+        self.assertIn("RadioLink.isMeshtastic(this)", body)
+        self.assertIn("MeshBoardDialog(", body)
 
     def test_the_dialog_never_asks_python_for_the_key_except_in_a_share_link(self):
         src = self.read("MeshBoardDialog.kt")
