@@ -570,30 +570,6 @@ class RadioLinkDialog(
         box.addView(screenButton)
         refreshScreenButton()
 
-        box.addView(TextView(activity).apply {
-            text = "Bluetooth ships switched off. Turning it on is once per radio — " +
-                    "normally over the USB cable — and the setting is stored in the " +
-                    "radio itself."
-            textSize = 12f
-            setTextColor(COLOR_IDLE)
-            setPadding(0, dp(10), 0, dp(6))
-        })
-
-        val row = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL }
-        fun cell(button: Button) = button.apply {
-            textSize = 12f
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                .apply { marginEnd = dp(6) }
-        }
-        row.addView(cell(Button(activity).apply {
-            text = "Turn on"
-            setOnClickListener { radioBluetooth("on") }
-        }))
-        row.addView(cell(Button(activity).apply {
-            text = "Pairing mode"
-            setOnClickListener { radioBluetooth("pair") }
-        }))
-        box.addView(row)
         return box
     }
 
@@ -635,24 +611,6 @@ class RadioLinkDialog(
                     reply ?: "The bridge is not running, so there is no link to the radio",
                     Toast.LENGTH_LONG
                 ).show()
-            }
-        }
-    }
-
-    private fun radioBluetooth(mode: String) {
-        Toast.makeText(activity, "Sending…", Toast.LENGTH_SHORT).show()
-        executor.execute {
-            val reply = PythonRnsService.call("enable_rnode_bluetooth", mode)
-            handler.post {
-                // A dialog, not a toast: this reply can contain the pairing
-                // code, and a code that vanishes after three seconds while
-                // Android is waiting for you to type it is no better than no
-                // code at all.
-                MaterialAlertDialogBuilder(activity)
-                    .setTitle("Radio Bluetooth")
-                    .setMessage(reply ?: "The bridge is not running, so there is no link to the radio")
-                    .setPositiveButton("OK", null)
-                    .show()
             }
         }
     }
@@ -714,7 +672,7 @@ class RadioLinkDialog(
                 text = if (meshtastic)
                     "No Meshtastic boards found yet. Make sure the board's Bluetooth is " +
                         "on and no other phone or app is connected to it, then scan."
-                else "No radios paired yet. Switch the radio's Bluetooth on, then scan."
+                else "No radios found yet. With the radio on the cable, use Switch to Bluetooth above; otherwise scan."
                 textSize = 12f
                 setTextColor(COLOR_WARN)
                 setPadding(0, dp(6), 0, dp(2))
@@ -769,13 +727,13 @@ class RadioLinkDialog(
     }
 
     /**
-     * Pairing is deliberately two taps, and the code comes first.
+     * Manual pairing of an RNode picked from the list (BluetoothSetup.pairPicked).
      *
-     * Android asks for a six-digit code that only the radio knows. It shows it
-     * on its own screen, but only while it is in pairing mode, and it also
-     * reports it back over the link — which is the copy this app can read and
-     * the operator cannot. Starting the bond before showing it puts the system
-     * prompt on top of the one thing you need in order to answer it.
+     * The radio reports its pairing code only once pairing has started, so the
+     * code cannot be shown before the Pair tap (measured 2026-11-10). With the
+     * radio on this phone's cable, the app puts it into pairing mode and fills
+     * the code in; without, the radio's own button does that and the code is
+     * read off its screen.
      */
     @SuppressLint("MissingPermission")
     private fun pair(device: BluetoothDevice) {
@@ -783,33 +741,25 @@ class RadioLinkDialog(
             pairMeshtastic(device)
             return
         }
-        executor.execute {
-            val pin = PythonRnsService.call("get_bt_pairing_pin").orEmpty()
-            handler.post {
-                val message = if (pin.isNotEmpty()) {
-                    "Pairing code: $pin\n\nEnter this when Android asks."
-                } else {
-                    "Android will ask for a six-digit code that only the radio " +
-                            "knows.\n\nIf you do not have it: tap Pairing mode " +
-                            "below with the radio connected, or hold the radio's " +
-                            "own button for five seconds and read the code off " +
-                            "its screen."
-                }
-                MaterialAlertDialogBuilder(activity)
-                    .setTitle("Pair with ${device.name ?: device.address}")
-                    .setMessage(message)
-                    .setNegativeButton("Not now", null)
-                    .setPositiveButton("Pair") { _, _ ->
-                        if (pin.isNotEmpty()) autoEnterPin(device, pin)
-                        if (!device.createBond()) {
-                            Toast.makeText(
-                                activity, "Android refused to start pairing", Toast.LENGTH_LONG
-                            ).show()
-                        }
-                    }
-                    .show()
+        val name = device.name ?: found[device.address] ?: device.address
+        val overCable = RadioLink.transport(activity) == RadioLink.TRANSPORT_USB &&
+            !RadioLink.isMeshtastic(activity)
+        MaterialAlertDialogBuilder(activity)
+            .setTitle("Pair with $name")
+            .setMessage(if (overCable)
+                    "If this is the radio on this phone's cable, the app puts it into " +
+                        "pairing mode and fills in the code.\n\nIf it is a different " +
+                        "radio, hold its button for 5 seconds first and type the code " +
+                        "from its screen when Android asks."
+                else "Hold the radio's button for 5 seconds to put it into pairing " +
+                    "mode, then tap Pair and type the code from its screen when " +
+                    "Android asks.")
+            .setNegativeButton("Not now", null)
+            .setPositiveButton("Pair") { _, _ ->
+                BluetoothSetup(activity) { _, _ -> renderDevices() }
+                    .pairPicked(device, name, overCable)
             }
-        }
+            .show()
     }
 
     /**
