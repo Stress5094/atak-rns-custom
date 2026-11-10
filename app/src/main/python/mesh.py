@@ -278,6 +278,11 @@ STATUS_SPACE = ("TRANSMIT STOPPED: counter space used up \u2014 "
                 "set a NEW passphrase on every phone")
 STATUS_PERSIST = ("TRANSMIT STOPPED: cannot persist the transmit counter "
                   "\u2014 free storage space or set a NEW passphrase")
+# From this many counters spent under one key, the status line asks for a new
+# passphrase before the 256 run out and transmit stops.
+COUNTER_WARN_AT = 240
+STATUS_COUNTER_LOW = ("COUNTER LOW: %d of %d used \u2014 change the passphrase "
+                      "soon")
 STATUS_COUNTER_RESET = ("COUNTER FILE WAS LOST \u2014 change the passphrase soon")
 
 
@@ -941,6 +946,7 @@ class Mesh(object):
                            + self._stats.get("replayed_unknown_epoch", 0))
         out["epoch"] = self._epoch
         out["counter"] = self._counter
+        out["nonce_counter"] = self._counter
         out["seq"] = self._seq
         stopped = self.tx_stopped()
         if stopped:
@@ -980,6 +986,8 @@ class Mesh(object):
         stopped = self.tx_stopped()
         if stopped:
             line += " -- " + stopped
+        elif self._counter >= COUNTER_WARN_AT:
+            line += " -- " + STATUS_COUNTER_LOW % (self._counter, EPOCH_SPACE)
         if self.counter_reset and not self._counter_reset_reported:
             self._counter_reset_reported = True
             line += " -- " + STATUS_COUNTER_RESET

@@ -2907,6 +2907,34 @@ class MainActivity : AppCompatActivity() {
             if (peerCount == 0) STATE_WARN else STATE_UP))
         localBox.addView(strip)
 
+        // THE TRANSMIT COUNTER, in words. The node is online and receiving when
+        // its nonce budget runs out, so nothing else on this screen looks wrong
+        // while it reaches nobody -- the same trap as FM TEST MODE below, and
+        // shown for every link, which is why it sits outside the FM block.
+        // Stopped is a fault (COLOR_DOWN, the strongest colour this file has);
+        // the early warning and the node-id notice are warnings.
+        // The reason arrives as a whole status line that already starts with
+        // "TRANSMIT STOPPED: "; keep only the cause so the banner is not doubled.
+        val txStopped = status.optString("tx_stopped").removePrefix("TRANSMIT STOPPED: ")
+        val txUsed = status.optInt("tx_counter_used", 0)
+        if (txStopped.isNotEmpty()) {
+            localBox.addView(line(
+                "TRANSMITTING STOPPED: $txStopped. Set a NEW passphrase in " +
+                    "Network settings (every phone needs it).",
+                COLOR_DOWN))
+        } else if (txUsed >= 240) {
+            localBox.addView(line(
+                "Change the passphrase soon: transmit counter $txUsed of 256 " +
+                    "used. The app stops transmitting at 256.",
+                COLOR_WARN))
+        }
+        if (status.optBoolean("node_id_changed")) {
+            localBox.addView(line(
+                "This phone has a new node id (its counter file was lost). " +
+                    "Other phones will see it as a new node.",
+                COLOR_WARN))
+        }
+
         // THE FM LINK'S OWN HONESTY BLOCK: four things no other link has to
         // say, all of them consequences of there being no acknowledgements on
         // this one (see fm_resend.py). Each existed for a measured reason, so
