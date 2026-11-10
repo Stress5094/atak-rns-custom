@@ -1980,12 +1980,21 @@ def _build_rnode_interface():
         while time.time() < deadline and not iface.online:
             time.sleep(0.5)
 
-    if not iface.online:
-        raise RuntimeError(
-            "RNode did not come online -- check the bridge socket is "
-            "connected, the radio is plugged in or paired, and the parameters "
-            "in rns_bridge.py match your board's supported range."
-        )
+    # STILL NOT ONLINE: REGISTER IT ANYWAY, OFFLINE. This used to raise, which
+    # left the bridge without a LoRa link for the rest of the session -- while
+    # RNodeInterface's own reconnect thread carried on and brought the radio up
+    # a minute later, on an interface nothing was registered to use. Measured
+    # 2026-11-10 (OnePlus 8T, Heltec v3 on USB): Android's USB permission
+    # prompt held the radio past this window, the bridge ran FM-only, and only
+    # a manual restart recovered it. Registered offline, the link counts as
+    # down (failover moves traffic to FM if there is one) and the reconnect
+    # thread's success is picked up by _check_auto_switch() like any other
+    # recovery, with the usual failback debounce.
+    came_late = not iface.online
+    if came_late:
+        RNS.log("[cot-bridge] RNode not online yet -- registering it offline; "
+                "it is used as soon as the radio connects (check the cable or "
+                "Bluetooth pairing if it never does)", RNS.LOG_WARNING)
 
     # Interface.OUT/IN default to False at the class level and are normally
     # only set to True by Reticulum's config-file interface_post_init(),
@@ -2030,8 +2039,66 @@ def _build_rnode_interface():
     # spends its afternoon in, and exactly when the evidence is least likely to
     # be read as a bug rather than as the range limit being found.
     _resize_reassembly(iface)
+    if came_late:
+        threading.Thread(target=_watch_late_rnode, args=(iface,),
+                         name="late-rnode", daemon=True).start()
+    threading.Thread(target=_rnode_port_watchdog, args=(iface,),
+                     name="rnode-watchdog", daemon=True).start()
 
     return iface
+
+
+def _rnode_stuck(iface):
+    """Marked online, not reconnecting, but its port is closed: the state
+    RNS's own reconnect logic cannot leave by itself."""
+    if not getattr(iface, "online", False) or getattr(iface, "reconnecting", False):
+        return False
+    port = getattr(iface, "serial", None)
+    return port is None or not getattr(port, "is_open", False)
+
+
+def _rnode_port_watchdog(iface, poll_s=2.0):
+    """Restart RNS's reconnect when it has stalled with the radio "online".
+
+    MEASURED 2026-11-10 (OnePlus 8T, Heltec v3 over BLE): the link dropped
+    40 ms after a reconnect configured the radio. RNodeInterface's read loop
+    saw the drop and set online=False, but skipped starting a reconnect
+    because the first one was still marked running; that one then set
+    online=True on the closed socket and finished. Result: "online", every
+    send failing with "Attempting to use a port that is not open", and no
+    retry ever again -- the radio connected again on the Kotlin side two
+    seconds later with nobody on the Python side to answer.
+
+    Two polls in a row are required, so a reconnect swapping the port over is
+    never mistaken for a stuck one."""
+    strikes = 0
+    while _lora_iface is iface and not getattr(iface, "detached", False):
+        time.sleep(poll_s)
+        if not _rnode_stuck(iface):
+            strikes = 0
+            continue
+        strikes += 1
+        if strikes < 2:
+            continue
+        strikes = 0
+        RNS.log("[cot-bridge] RNode marked online but its port is closed -- "
+                "reconnecting", RNS.LOG_WARNING)
+        iface.online = False
+        threading.Thread(target=iface.reconnect_port, name="rnode-reconnect",
+                         daemon=True).start()
+
+
+def _watch_late_rnode(iface, poll_s=2.0):
+    """Wait for an RNode registered offline at startup to connect, then size
+    the reassembly window against its real bitrate (it was sized against the
+    fallback while the radio could not say). Ends when the radio is up, or
+    when the interface is replaced by a restart."""
+    while _lora_iface is iface and not getattr(iface, "online", False):
+        time.sleep(poll_s)
+    if _lora_iface is iface:
+        RNS.log("[cot-bridge] RNode came online after startup; LoRa link is "
+                "now usable", RNS.LOG_NOTICE)
+        _resize_reassembly(iface)
 
 
 def _build_mesh_interface():
