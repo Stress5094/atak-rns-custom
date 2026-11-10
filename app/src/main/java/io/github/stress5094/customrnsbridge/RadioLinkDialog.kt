@@ -118,8 +118,9 @@ class RadioLinkDialog(
     private lateinit var customLabel: TextView
     private lateinit var customEditButton: View
 
-    // The Debug tab's "Advanced features" switch: off hides the WiFi mesh,
-    // custom FM, no-PTT cable and test mode below. Hidden settings keep their
+    // The Debug tab's "Advanced features" switch: off hides the WiFi mesh and
+    // the whole FM tone section (placement, custom FM, no-PTT cable, test
+    // mode) below. Hidden settings keep their
     // values -- this only decides what is shown.
     private val advanced = RadioLink.advancedEnabled(activity)
 
@@ -213,7 +214,7 @@ class RadioLinkDialog(
             fmBackupCheckbox.visibility =
                 if (transport == RadioLink.TRANSPORT_FM) View.GONE else View.VISIBLE
             toneProfileSection.visibility =
-                if (fmInUse()) View.VISIBLE else View.GONE
+                if (fmInUse() && advanced) View.VISIBLE else View.GONE
         }
         body.addView(group)
 
@@ -253,13 +254,13 @@ class RadioLinkDialog(
                 // Turning backup on is the other way FM starts carrying
                 // traffic, so it reveals the tone picker too.
                 toneProfileSection.visibility =
-                    if (fmInUse()) View.VISIBLE else View.GONE
+                    if (fmInUse() && advanced) View.VISIBLE else View.GONE
             }
         }
         body.addView(fmBackupCheckbox)
 
         toneProfileSection = buildToneProfileSection().apply {
-            visibility = if (fmInUse()) View.VISIBLE else View.GONE
+            visibility = if (fmInUse() && advanced) View.VISIBLE else View.GONE
         }
         body.addView(toneProfileSection)
 

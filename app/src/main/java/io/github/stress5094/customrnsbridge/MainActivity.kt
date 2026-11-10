@@ -1674,8 +1674,8 @@ class MainActivity : AppCompatActivity() {
         // and in Radio link the WiFi mesh, custom FM, the no-PTT cable and
         // receive-only test mode. It only hides them; values already set stay.
         box.addView(sectionLabel("Advanced features"))
-        box.addView(sectionCaption("Shows link forcing here, and the WiFi mesh, " +
-            "custom FM, no-PTT cable and test mode options in Radio link"))
+        box.addView(sectionCaption("Shows link forcing and status detail here, " +
+            "and the WiFi mesh and FM tone settings in Radio link"))
         box.addView(com.google.android.material.materialswitch.MaterialSwitch(this).apply {
             text = "Show advanced features"
             isChecked = RadioLink.advancedEnabled(this@MainActivity)
@@ -1688,6 +1688,13 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             visibility = if (RadioLink.advancedEnabled(this@MainActivity)) View.VISIBLE else View.GONE
         }
+        advancedBox.addView(com.google.android.material.materialswitch.MaterialSwitch(this).apply {
+            text = "Show detailed status on the Status tab"
+            isChecked = RadioLink.statusDetails(this@MainActivity)
+            setOnCheckedChangeListener { _, on ->
+                RadioLink.setStatusDetails(this@MainActivity, on)
+            }
+        })
         advancedBox.addView(TextView(this).apply {
             text = "Link"
             textSize = 13f
@@ -2679,8 +2686,12 @@ class MainActivity : AppCompatActivity() {
         // is used. A protocol gap makes two nodes ignore each other while both
         // look perfectly healthy, and the build stamp catches the case before
         // that one: only one phone got the new APK.
+        // Informational lines (build stamp, FM net code and operating point,
+        // receive summary, re-send counts) only with Debug → Advanced
+        // features → Show detailed status. Warnings always show.
+        val details = RadioLink.statusDetails(this)
         val protocol = status.optInt("protocol", 0)
-        localBox.addView(line(
+        if (details) localBox.addView(line(
             "protocol v$protocol   ·   build ${BuildConfig.BUILD_STAMP}",
             COLOR_IDLE
         ))
@@ -2768,12 +2779,12 @@ class MainActivity : AppCompatActivity() {
             // The net code first: the short line two operators read to each
             // other. Equal codes are on the same net whatever each node's
             // profile is called (fm_custom.net_code).
-            fm.optString("net_code").takeIf { it.isNotEmpty() }?.let {
+            fm.optString("net_code").takeIf { details && it.isNotEmpty() }?.let {
                 localBox.addView(line("FM net code: $it (must match the other radios)",
                     if (fm.optBoolean("profile_is_default", true)) COLOR_IDLE
                     else COLOR_WARN))
             }
-            fm.optString("operating_point").takeIf { it.isNotEmpty() }?.let {
+            fm.optString("operating_point").takeIf { details && it.isNotEmpty() }?.let {
                 localBox.addView(line(it,
                     if (fm.optBoolean("profile_is_default", true)) COLOR_IDLE
                     else COLOR_WARN))
@@ -2783,7 +2794,7 @@ class MainActivity : AppCompatActivity() {
             // one honest thing this screen can tell them. New in the rebuild
             // -- Phase 1 made every profile carry its own evidence precisely
             // so this line could exist.
-            fm.optString("evidence").takeIf { it.isNotEmpty() }?.let {
+            fm.optString("evidence").takeIf { details && it.isNotEmpty() }?.let {
                 localBox.addView(line(it, COLOR_IDLE))
             }
             // A burst going out UNKEYED although the configuration asks for
@@ -2816,7 +2827,9 @@ class MainActivity : AppCompatActivity() {
             //    Tinted on saturation, which is the one measured, directly
             //    fixable condition here whose symptom otherwise reads as
             //    healthy.
-            fmHealth?.optString("summary")?.takeIf { it.isNotEmpty() }?.let {
+            fmHealth?.optString("summary")?.takeIf {
+                it.isNotEmpty() && (details || fmHealth.optBoolean("saturated"))
+            }?.let {
                 localBox.addView(line(it,
                     if (fmHealth.optBoolean("saturated")) COLOR_WARN else COLOR_IDLE))
             }
@@ -2826,7 +2839,12 @@ class MainActivity : AppCompatActivity() {
             //    one direction; this says where it actually is, so correcting
             //    it cannot silently overshoot into "Silent", which is exactly
             //    what happened twice on 2026-09-30.
-            fmHealth?.optString("level_line")?.takeIf { it.isNotEmpty() }?.let {
+            // Shown without details when it is advice: which way to turn the
+            // volume knob.
+            fmHealth?.optString("level_line")?.takeIf {
+                it.isNotEmpty() && (details ||
+                    fmHealth.optString("level_state") !in setOf("good", "none"))
+            }?.let {
                 localBox.addView(line(it, when (fmHealth.optString("level_state")) {
                     "good" -> COLOR_UP
                     "none" -> COLOR_IDLE
@@ -2843,7 +2861,7 @@ class MainActivity : AppCompatActivity() {
                     "$inflight message(s) still being re-sent -- confirmed " +
                         "only if a peer happens to report hearing them",
                     COLOR_WARN))
-            } else {
+            } else if (details) {
                 localBox.addView(line(
                     "nothing waiting to be re-sent", COLOR_IDLE))
             }
@@ -2851,7 +2869,7 @@ class MainActivity : AppCompatActivity() {
             // here is a peer volunteering that it heard something, on its own
             // beacon schedule. The absence of one means nothing at all, which
             // is the opposite of how a delivery indicator usually reads.
-            if (confirmed > 0) {
+            if (details && confirmed > 0) {
                 localBox.addView(line(
                     "$confirmed message(s) confirmed heard by a peer",
                     COLOR_IDLE))
