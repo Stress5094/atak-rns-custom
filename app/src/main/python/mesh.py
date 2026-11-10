@@ -57,9 +57,10 @@ bumps it too. See `Mesh.next_frame_id`.
 
 THE EPOCH BYTE IS ONLY 8 BITS OF A LONGER COUNTER. The wire carries
 `counter & 0xFF`, but the counter itself is a full integer that is never
-masked, stored in the epoch file together with the fingerprint of the key it
-was spent under. Under one key it can be spent 256 times (every process start,
-every re-key back to the same key's file, every 16-bit seq wrap); after that
+masked, stored in the epoch file in a map of key fingerprint -> counter (at
+most MAX_EPOCH_KEYS keys, least recently used dropped), so returning to an
+earlier passphrase continues its count. Under one key it can be spent 256 times
+(every process start, every re-key, every 16-bit seq wrap); after that
 the next bump would repeat a nonce. So at 256 the Mesh refuses to transmit
 (`wrap()` raises MeshError) until the passphrase is changed, which gives a new
 key and therefore a fresh nonce space. Receiving is unaffected. The same stop
@@ -283,33 +284,76 @@ STATUS_COUNTER_RESET = ("COUNTER FILE WAS LOST \u2014 change the passphrase soon
 EpochClaim = collections.namedtuple("EpochClaim", "counter exhausted counter_reset")
 
 
-def _read_epoch_file(path):
-    """-> (fp, counter, lost). `lost` is True when nothing usable is there.
+# Counters remembered per key. Past this many, the least recently used key's
+# entry is dropped. A team that cycles through more than this many passphrases
+# and then returns to a dropped one re-opens the nonce-reuse gap for THAT old
+# key's recordings (its counter restarts at 0); that is outside the threat
+# model.
+MAX_EPOCH_KEYS = 32
 
-    Two formats: the current JSON {"fp": ..., "counter": ...}, and the bare
-    integer older builds wrote, read as an unfingerprinted counter that the
-    next save adopts under the current key.
+
+def _read_epoch_file(path, fp=None):
+    """-> (counters, lost). `counters` maps fingerprint -> last counter, oldest
+    use first; `lost` is True when nothing usable is there.
+
+    Three formats are read: the current {"counters": {fp: n, ...}}, round 1's
+    {"fp": ..., "counter": n}, and the bare integer older builds wrote. A bare
+    integer has no key of its own and is adopted under `fp`, the key being
+    loaded now.
     """
     try:
         with open(path) as f:
             text = f.read().strip()
     except OSError:
-        return None, 0, True
+        return {}, True
     try:
         data = json.loads(text)
     except ValueError:
-        return None, 0, True
+        return {}, True
     if isinstance(data, bool):
-        return None, 0, True
+        return {}, True
     if isinstance(data, int):
-        return (None, data, False) if data >= 0 else (None, 0, True)
+        return ({fp or "": data}, False) if data >= 0 else ({}, True)
     if isinstance(data, dict):
+        table = data.get("counters")
+        if isinstance(table, dict):
+            if all(isinstance(k, str) and isinstance(v, int)
+                   and not isinstance(v, bool) and v >= 0
+                   for k, v in table.items()):
+                return dict(table), False
+            return {}, True
         counter = data.get("counter")
-        fp = data.get("fp")
+        old_fp = data.get("fp")
         if (isinstance(counter, int) and not isinstance(counter, bool)
-                and counter >= 0 and (fp is None or isinstance(fp, str))):
-            return fp, counter, False
-    return None, 0, True
+                and counter >= 0 and (old_fp is None or isinstance(old_fp, str))):
+            return {(old_fp if old_fp is not None else (fp or "")): counter}, False
+    return {}, True
+
+
+def _write_epoch_file(counters, path):
+    """Atomically rewrite the whole map; True if it stuck."""
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w") as f:
+            f.write(json.dumps({"counters": counters}))
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except OSError:
+                pass
+        os.replace(tmp, path)
+        return True
+    except OSError:
+        return False
+
+
+def _touch(counters, key, counter):
+    """Record `counter` for `key` as the most recently used entry, then drop
+    the least recently used ones beyond MAX_EPOCH_KEYS."""
+    counters.pop(key, None)
+    counters[key] = int(counter)
+    while len(counters) > MAX_EPOCH_KEYS:
+        del counters[next(iter(counters))]
 
 
 def load_epoch(path=_EPOCH_PATH, fp=None):
@@ -320,53 +364,49 @@ def load_epoch(path=_EPOCH_PATH, fp=None):
     (epoch, seq) pairs it had already used -- nonce reuse, the one failure in
     this module with real consequences.
 
-    * Same key as the stored fingerprint (or a legacy bare-int file, which has
-      none): stored counter + 1.
-    * Different key: 0. A new key is a fresh nonce space.
+    The file keeps one counter PER key, so going passphrase A -> B -> A
+    continues A's count instead of restarting it against recordings made
+    under A.
+
+    * Key already in the file: its stored counter + 1.
+    * Key not in the file (but the file is fine): 0. A new key is a fresh nonce
+      space, and not a sign of anything lost.
     * File missing or corrupt: 0, with `counter_reset` set. Under an unchanged
       key this could reuse low counters, which is why it is reported rather
       than hidden; the airtight fix is changing the passphrase.
-    * Counter would reach EPOCH_SPACE: `exhausted` = EXHAUSTED_SPACE and
-      nothing is written. The Mesh will refuse to transmit.
+    * Counter would reach EPOCH_SPACE: `exhausted` = EXHAUSTED_SPACE and the
+      stored counter is left as it was. The Mesh will refuse to transmit.
     * Counter cannot be saved: `exhausted` = EXHAUSTED_PERSIST. There is no
       random fallback.
     """
-    stored_fp, stored, lost = _read_epoch_file(path)
+    key = fp or ""
+    counters, lost = _read_epoch_file(path, fp)
     counter_reset = lost
-    if lost:
-        counter = 0
-    elif stored_fp is not None and fp is not None and stored_fp != fp:
-        counter = 0
-    else:
-        counter = stored + 1
+    stored = counters.get(key)
+    counter = 0 if stored is None else stored + 1
     if counter >= EPOCH_SPACE:
+        # Mark the key as just used (so it is not the next one evicted) but
+        # keep its stored counter; a failed write changes nothing.
+        _touch(counters, key, stored)
+        _write_epoch_file(counters, path)
         return EpochClaim(counter, EXHAUSTED_SPACE, counter_reset)
-    if not save_epoch(counter, fp, path):
+    if not save_epoch(counter, fp, path, _counters=counters):
         return EpochClaim(counter, EXHAUSTED_PERSIST, counter_reset)
     return EpochClaim(counter, None, counter_reset)
 
 
-def save_epoch(counter, fp=None, path=_EPOCH_PATH):
-    """Record the counter now in use, with the key it belongs to, so the next
-    start comes after it. Also called when a sequence wrap bumps the counter
-    mid-run -- that bump has the same meaning as a restart and has to survive
-    one. Returns whether it stuck; a False is treated by the Mesh as grounds
-    to stop transmitting. Written to a temporary file and renamed, so a crash
-    mid-write cannot leave a corrupt file (which would read as a lost one).
+def save_epoch(counter, fp=None, path=_EPOCH_PATH, _counters=None):
+    """Record the counter now in use under key `fp`, so the next start comes
+    after it. Also called when a sequence wrap bumps the counter mid-run --
+    that bump has the same meaning as a restart and has to survive one. The
+    other keys' counters are kept. Returns whether it stuck; a False is treated
+    by the Mesh as grounds to stop transmitting. Written to a temporary file
+    and renamed, so a crash mid-write cannot leave a corrupt file (which would
+    read as a lost one).
     """
-    tmp = path + ".tmp"
-    try:
-        with open(tmp, "w") as f:
-            f.write(json.dumps({"fp": fp, "counter": int(counter)}))
-            f.flush()
-            try:
-                os.fsync(f.fileno())
-            except OSError:
-                pass
-        os.replace(tmp, path)
-        return True
-    except OSError:
-        return False
+    counters = _counters if _counters is not None else _read_epoch_file(path, fp)[0]
+    _touch(counters, fp or "", counter)
+    return _write_epoch_file(counters, path)
 
 
 Inbound = collections.namedtuple("Inbound", "origin epoch seq hops frame duplicate")
