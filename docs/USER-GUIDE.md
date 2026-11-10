@@ -762,6 +762,7 @@ changes at once and nobody is left on the old settings
 | Meshtastic board stops after a settings change | The board restarted. Tick "always open with this app" in the USB prompt. |
 | *No ATAK* | ATAK server entry missing or wrong. It must be `127.0.0.1:7103`, TCP. |
 | *TRANSMIT STOPPED: counter space used up* | Each passphrase can only be used for a limited number of app starts before this phone refuses to send, because sending more would weaken the encryption. The phone still receives. Set a NEW passphrase (use *New passphrase*) on every phone. The same stop appears if the phone cannot save its counter, usually full storage. |
+| *Change the passphrase soon: transmit counter 240 of 256 used* | Early warning for the stop above. Set a NEW passphrase on every phone before the counter reaches 256. |
 | *COUNTER FILE WAS LOST* | The phone forgot how far it had counted, so it came back with a new node id. Other phones will list it as a new node. Change the passphrase soon. |
 | FM *Garbled* | Receive volume wrong. Follow the level readout. Too high is as bad as too low. |
 | FM *Silent* | Radio off, squelch closed, or cable unplugged. |

@@ -485,6 +485,31 @@ class TestLoadEpoch(unittest.TestCase):
 
 
 @skip_without_backend
+class TestCounterWarning(unittest.TestCase):
+    def _mesh(self, counter):
+        return mesh.Mesh("aa11bb", mesh.derive_key("x", rounds=1), epoch=counter)
+
+    def test_239_has_no_warning(self):
+        m = self._mesh(239)
+        self.assertNotIn("COUNTER LOW", m.summary_line())
+        self.assertEqual(m.stats()["nonce_counter"], 239)
+
+    def test_240_warns_with_the_count(self):
+        m = self._mesh(mesh.COUNTER_WARN_AT)
+        self.assertEqual(mesh.COUNTER_WARN_AT, 240)
+        self.assertIn("COUNTER LOW: 240 of 256 used", m.summary_line())
+        self.assertIn("change the passphrase soon", m.summary_line())
+
+    def test_255_still_warns(self):
+        self.assertIn("COUNTER LOW: 255 of 256 used", self._mesh(255).summary_line())
+
+    def test_256_shows_the_stop_not_the_warning(self):
+        line = self._mesh(256).summary_line()
+        self.assertIn("TRANSMIT STOPPED", line)
+        self.assertNotIn("COUNTER LOW", line)
+
+
+@skip_without_backend
 class TestEpochExhaustion(unittest.TestCase):
     def test_counter_255_still_transmits_256_does_not(self):
         m = node(epoch=255)

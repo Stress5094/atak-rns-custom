@@ -7684,6 +7684,9 @@ def get_status():
             # nonce counter is used up or cannot be saved. Receiving still works.
             "tx_stopped": (_mesh.tx_stopped() or "") if _mesh is not None else "",
             "node_id_changed": _node_id_regenerated,
+            # How much of this key's 256-value transmit counter is spent; the
+            # status screen warns from mesh.COUNTER_WARN_AT.
+            "tx_counter_used": _mesh.stats()["nonce_counter"] if _mesh is not None else 0,
             # Four characters the operator can compare across devices. Matching
             # is the only quick proof two nodes share a key, because a wrong
             # passphrase and a dead radio look identical from the outside.

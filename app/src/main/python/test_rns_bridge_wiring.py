@@ -4213,6 +4213,15 @@ class TestExhaustedMeshStopsTransmitting(unittest.TestCase):
                                      epoch=3)
         self.assertEqual(json.loads(rns_bridge.get_status())["tx_stopped"], "")
 
+    def test_status_carries_the_counter_used(self):
+        import json
+        self.assertEqual(json.loads(rns_bridge.get_status())["tx_counter_used"], 256)
+        rns_bridge._mesh = mesh.Mesh("aa11bb", mesh.derive_key("x", rounds=1),
+                                     epoch=241)
+        self.assertEqual(json.loads(rns_bridge.get_status())["tx_counter_used"], 241)
+        rns_bridge._mesh = None
+        self.assertEqual(json.loads(rns_bridge.get_status())["tx_counter_used"], 0)
+
     def test_the_beacon_path_drops_instead_of_raising(self):
         class _Up(object):
             online = True
