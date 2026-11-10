@@ -240,7 +240,11 @@ prediction and hasn't been checked against measured range.
 
 - **Model…:** radio power (LoRa and FM), antenna height and other model
   inputs. **Defaults** resets them.
-- **My location:** centres the map on you. **Recompute** reruns the model.
+- **My location:** centres the map on you and recomputes from there. Coverage
+  also recomputes by itself when you open the tab, pick another radio, save
+  the model, long-press the map, finish a download, or move 100 m. If a
+  calculation fails (for example, no internet for a new place), tap My
+  location to try again.
 - **Streets view / Satellite view:** switches the base map.
 - **Download an area for offline use:** drag a box to download map and
   building data before going out of coverage.
