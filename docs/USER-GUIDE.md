@@ -96,7 +96,7 @@ Everything here lives under **Status → Radio link**.
   phone uses. With two paired and none chosen, the app waits rather than
   guessing.
 
-**Advanced options.** These only appear after you turn on *Debug → Show
+**Advanced options.** These only appear after you turn on *Advanced → Show
 advanced features*. Turning the switch off hides them again but keeps their
 values.
 
@@ -138,9 +138,9 @@ ATAK's own mesh networking already uses 8087.
 
 ## 5. The screens
 
-The app has three tabs: **Status, Debug, Network**. Network has two sub-tabs
+The app has three tabs: **Status, Advanced, Network**. Network has two sub-tabs
 at the top, **Mesh** and **Coverage**, and reopens on the one you used last. A
-fourth tab, **Share**, appears when you turn on *Debug → Show advanced
+fourth tab, **Share**, appears when you turn on *Advanced → Show advanced
 features → Show the Share tab*.
 
 ### Status
@@ -171,7 +171,7 @@ The tab you use day to day.
   - *off* (dimmed): not set up.
   - The WiFi button only appears when Wi-Fi is on or advanced features are on.
   - Tap any of them to open **Radio link**.
-  - If a link has been forced from the Debug tab, a warning line says so.
+  - If a link has been forced from the Advanced tab, a warning line says so.
 - **Tiles:**
   - **Airtime:** this node's share of the channel. A warning shows above 30%.
   - **Channel:** how busy the channel is.
@@ -189,7 +189,7 @@ The tab you use day to day.
   - **Restart bridge**
   - **Quit app**, which stops the service fully
 
-### Debug
+### Advanced
 
 Bench and field-test tools.
 
@@ -259,7 +259,7 @@ prediction and hasn't been checked against measured range.
 
 ### Share
 
-Hidden unless *Show the Share tab* is on (Debug → Advanced features).
+Hidden unless *Show the Share tab* is on (Advanced → Advanced features).
 Settings sharing between phones. See [section 11](#11-sharing-settings-with-a-team).
 
 - **This phone as a host:** **Host settings for phones on this WiFi**.
@@ -458,7 +458,7 @@ if you turned it on and its hardware is attached.
      unhealthy, because moving to a slower radio wouldn't help.
    - **FM** has no acknowledgements, so it counts as healthy whenever it is
      connected.
-5. **Manual override** (*Force LoRa / FM / WiFi* under *Debug → Advanced features*) beats all
+5. **Manual override** (*Force LoRa / FM / WiFi* under *Advanced → Advanced features*) beats all
    of the above until you choose *Auto* again.
 6. **Per-message choices for one-shot messages:**
    - A message for a peer this phone has only ever heard on FM goes straight
@@ -672,7 +672,7 @@ changes at once and nobody is left on the old settings
 | A message under *Messages* / *Undelivered* | It got no acknowledgement after every retry. Resend, or move closer. |
 | High *Airtime* | Too many nodes or too slow a preset. See the preset table in [section 6](#lora-settings-rnode). |
 
-For a field problem, use *Debug → Start log*, reproduce the problem, then
+For a field problem, use *Advanced → Start log*, reproduce the problem, then
 *Export*.
 
 ## 13. What has been tested

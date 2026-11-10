@@ -118,7 +118,7 @@ class RadioLinkDialog(
     private lateinit var customLabel: TextView
     private lateinit var customEditButton: View
 
-    // The Debug tab's "Advanced features" switch: off hides the WiFi mesh and
+    // The Advanced tab's "Advanced features" switch: off hides the WiFi mesh and
     // the whole FM tone section (placement, custom FM, no-PTT cable, test
     // mode) below. Hidden settings keep their
     // values -- this only decides what is shown.
