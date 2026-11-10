@@ -107,6 +107,11 @@ class FmAudioBridgeService : RadioBridgeService() {
         // Bench hook's request file, in filesDir. See playBenchRequests().
         private const val BENCH_PLAY_REQUEST = "fm_play_req"
 
+        // Station ID timer: how often it checks whether an ID is due, and how
+        // long after the link opens the first one waits.
+        private const val CALLSIGN_CHECK_MS = 15_000L
+        private const val CALLSIGN_FIRST_DELAY_MS = 30_000L
+
         // A reading older than one chunk cannot answer "is the channel busy
         // RIGHT NOW" -- and the most common reason it goes stale is this
         // phone's OWN previous transmission: startRxLoop()'s isTransmitting
@@ -248,6 +253,19 @@ class FmAudioBridgeService : RadioBridgeService() {
     /** When this node's last burst ended (elapsedRealtime), 0 = none yet. See
      *  spaceFromLastBurst(). */
     @Volatile private var lastBurstEndMs = 0L
+
+    // ONE TRANSMITTER, TWO CALLERS: data bursts arrive on the socket pump
+    // thread, station IDs on their own timer thread. Held around each whole
+    // key-play-unkey so the two can never overlap on the radio.
+    private val txLock = Any()
+
+    // Station ID timer (see startCallsignTimer). lastIdAtMs is elapsedRealtime
+    // of the last ID sent, 0 = none yet; kept across link reopens so a flapping
+    // cable does not re-send the ID every time it comes back.
+    @Volatile private var callsignThread: Thread? = null
+    @Volatile private var lastIdAtMs = 0L
+    @Volatile private var linkOpenedAtMs = 0L
+    private var loggedBadCallsign: String? = null
 
     // Event-driven detection, added 2026-09-22 after real hardware showed the
     // old purely-poll-driven design could go tens of seconds without even
@@ -417,7 +435,9 @@ class FmAudioBridgeService : RadioBridgeService() {
                 "routedDevice=${routed?.productName} (type ${routed?.type})")
         Log.i(TAG, "FM operating point: ${fetched.summary}")
         if (fetched.keysPtt) connectPtt()
+        linkOpenedAtMs = android.os.SystemClock.elapsedRealtime()
         startRxLoop()
+        startCallsignTimer()
     }
 
     override fun isLinkOpen() = record != null
@@ -630,6 +650,10 @@ class FmAudioBridgeService : RadioBridgeService() {
     }
 
     private fun transmitOneFrame(payload: ByteArray) {
+        synchronized(txLock) { transmitOneFrameLocked(payload) }
+    }
+
+    private fun transmitOneFrameLocked(payload: ByteArray) {
         // TEST MODE (RadioLink.fmTxOff): receive only. Checked per burst, as the
         // very first thing, so it holds against every sender at once -- beacons,
         // messages and the blind resend schedules all arrive here. Logged at
@@ -771,6 +795,131 @@ class FmAudioBridgeService : RadioBridgeService() {
             noteTxState(false)
             lastBurstEndMs = android.os.SystemClock.elapsedRealtime()
         }
+    }
+
+    /**
+     * STATION ID: the operator's callsign (RadioLink.fmCallsign) as audible
+     * Morse every RadioLink.fmCallsignIntervalMin() minutes while this link is
+     * open. Sent in the CLEAR -- not sealed with the network key, not through
+     * the data modem -- so any receiver can read who is transmitting.
+     *
+     * The first ID goes out CALLSIGN_FIRST_DELAY_MS after the link opens (the
+     * receive loop needs a few fresh readings for listen-before-transmit to
+     * mean anything), then on the interval. Settings are re-read on every
+     * check, so a callsign entered or cleared takes effect without a restart.
+     */
+    private fun startCallsignTimer() {
+        if (callsignThread?.isAlive == true) return
+        val t = Thread({
+            while (running) {
+                try {
+                    Thread.sleep(CALLSIGN_CHECK_MS)
+                } catch (e: InterruptedException) {
+                    return@Thread
+                }
+                if (!running) break
+                try {
+                    maybeSendCallsignId()
+                } catch (e: Exception) {
+                    Log.e(TAG, "station ID failed", e)
+                }
+            }
+        }, "fm-callsign-id")
+        t.isDaemon = true
+        callsignThread = t
+        t.start()
+    }
+
+    private fun maybeSendCallsignId() {
+        val call = RadioLink.fmCallsign(applicationContext)
+        if (call.isBlank()) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        val last = lastIdAtMs
+        val due = if (last == 0L) {
+            now - linkOpenedAtMs >= CALLSIGN_FIRST_DELAY_MS
+        } else {
+            now - last >= RadioLink.fmCallsignIntervalMin(applicationContext) * 60_000L
+        }
+        if (!due) return
+        // Test mode means "this node transmits nothing"; the ID is no exception.
+        if (RadioLink.fmTxOff(applicationContext)) return
+        if (!Python.isStarted()) return
+        val fmLink = Python.getInstance().getModule("fm_link")
+        val pcmObj = fmLink.callAttr("callsign_id_pcm", call)
+        if (pcmObj == null) {
+            if (loggedBadCallsign != call) {
+                Log.e(TAG, "station ID: '$call' is not a valid callsign; not sending")
+                loggedBadCallsign = call
+            }
+            return
+        }
+        val pcm = pcmObj.toJava(ByteArray::class.java)
+        if (sendCallsignId(pcm, call)) lastIdAtMs = android.os.SystemClock.elapsedRealtime()
+    }
+
+    /** Key, play `pcm`, unkey -- the transmitOneFrame sequence (spacing,
+     * listen-before-transmit, key-up wait, drain, unkey in finally) for audio
+     * that is already built. Returns true once the audio has played. */
+    private fun sendCallsignId(pcm: ByteArray, call: String): Boolean = synchronized(txLock) {
+        val p = AudioPlan.fetch(applicationContext) ?: return false
+        if (record == null || !running) return false
+        spaceFromLastBurst(p)
+        var keyed = false
+        var track: AudioTrack? = null
+        var sent = false
+        try {
+            val am = audioManager ?: return false
+            val usbOut = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull { it.isUsbAudioDevice() }
+            val minBuf = AudioTrack.getMinBufferSize(
+                p.sampleRateHz, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT)
+            track = AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build())
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setSampleRate(p.sampleRateHz)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .build())
+                .setBufferSizeInBytes(maxOf(minBuf, pcm.size))
+                .setTransferMode(AudioTrack.MODE_STATIC)
+                .build()
+            if (usbOut != null) track.preferredDevice = usbOut
+            track.setVolume(RadioLink.fmTxGain(applicationContext))
+            am.setStreamVolume(
+                AudioManager.STREAM_VOICE_CALL, am.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL), 0)
+            track.write(pcm, 0, pcm.size)
+
+            waitForChannelClear(p)
+            isTransmitting.set(true)
+            noteTxState(true)
+            keyed = keyIfConfigured(p)
+            val keyupMs = (p.pttKeyupS * 1000).toLong()
+            if (keyed && keyupMs > 0) Thread.sleep(keyupMs)
+            track.play()
+            val durationMs = (pcm.size / 2).toLong() * 1000L / p.sampleRateHz
+            Thread.sleep(durationMs + 300)
+            track.stop()
+            sent = true
+            Log.i(TAG, "STATION ID sent in the clear: $call (${durationMs} ms Morse, keyed=$keyed)")
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+        } catch (e: Exception) {
+            Log.e(TAG, "station ID transmit failed", e)
+        } finally {
+            try { track?.release() } catch (e: Exception) { /* best effort */ }
+            // Same rule as transmitOneFrame: PTT is dropped on every path out.
+            if (keyed) {
+                try { ptt?.unkey() } catch (e: Exception) { /* best effort */ }
+            }
+            isTransmitting.set(false)
+            noteTxState(false)
+            lastBurstEndMs = android.os.SystemClock.elapsedRealtime()
+        }
+        sent
     }
 
     /**

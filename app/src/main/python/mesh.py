@@ -148,6 +148,8 @@ NONCE_LEN = 12
 # repeat whatever its tag says.
 TAG_LEN = 4
 OVERHEAD = HEADER_LEN + TAG_LEN
+# A clear frame (cot_codec.T_CLEAR) is the header and the plaintext: no tag.
+CLEAR_OVERHEAD = HEADER_LEN
 
 _HOPS_OFFSET = 7
 # origin || epoch || seq, i.e. the authenticated header minus its ctrl byte.
@@ -389,6 +391,11 @@ class Mesh(object):
         # The version last heard from a peer that is not on ours, so a report
         # can name which build to update rather than only that something is off.
         self._peer_version = None
+        # Whether unencrypted frames (cot_codec.T_CLEAR) are accepted. Off by
+        # default: a clear frame proves nothing about who sent it, so a node
+        # that has not opted in treats them as foreign. A node set to send FM
+        # unencrypted turns this on, since its peers will be doing the same.
+        self.accept_clear = False
 
     # -- outbound -----------------------------------------------------------
 
@@ -451,7 +458,11 @@ class Mesh(object):
 
         Returns None if there is nothing left to spend.
         """
-        if not is_mesh(packet) or len(packet) < HEADER_LEN + TAG_LEN + 1:
+        clear = is_clear(packet)
+        if clear:
+            if len(packet) < HEADER_LEN + 1:
+                return None
+        elif not is_mesh(packet) or len(packet) < HEADER_LEN + TAG_LEN + 1:
             return None
         hops = min(packet[_HOPS_OFFSET], MAX_HOPS)
         if hops <= 0:
@@ -460,6 +471,30 @@ class Mesh(object):
         out[_HOPS_OFFSET] = hops - 1
         self._stats["forwarded"] += 1
         return bytes(out)
+
+    def to_clear(self, packet):
+        """A sealed mesh frame -> the same frame unencrypted (T_CLEAR), for
+        sending where the content must be readable by any listener.
+
+        Same header (origin, epoch, seq, hops) with only the type changed, so
+        duplicate suppression and relaying work exactly as for a sealed frame,
+        and the plaintext in place of ciphertext+tag -- 4 bytes SHORTER, so
+        anything sized for a sealed frame still fits. A frame that is already
+        clear passes through. Returns None for anything that does not decrypt
+        under this key (it is not ours to re-send in the clear).
+        """
+        if is_clear(packet):
+            return bytes(packet)
+        if not is_mesh(packet) or len(packet) < HEADER_LEN + TAG_LEN + 1:
+            return None
+        header = bytes(packet[:HEADER_LEN])
+        try:
+            frame = self._aead.decrypt(_nonce(header), bytes(packet[HEADER_LEN:]),
+                                       header[:AAD_LEN])
+        except InvalidTag:
+            return None
+        self._stats["sent_clear"] += 1
+        return bytes([cot_codec.CTRL_CLEAR]) + header[1:] + frame
 
     def overhead(self):
         """Bytes wrap() will add, so a caller can shrink the budget it hands to
@@ -483,6 +518,8 @@ class Mesh(object):
         while a relay must not forward one.
         """
         try:
+            if is_clear(packet):
+                return self._unwrap_clear(packet)
             if not is_mesh(packet):
                 # A frame carrying our envelope's TYPE but a different protocol
                 # version is a peer running another build, and it deserves
@@ -528,6 +565,25 @@ class Mesh(object):
             self._stats["error"] += 1
             return None
 
+    def _unwrap_clear(self, packet):
+        """unwrap() for an unencrypted frame: accepted only when this node has
+        opted in (accept_clear); otherwise the same non-event as a foreign
+        network's frame."""
+        if not self.accept_clear:
+            self._stats["clear_ignored"] += 1
+            return None
+        if len(packet) < HEADER_LEN + 1:
+            self._stats["truncated"] += 1
+            return None
+        header = packet[:HEADER_LEN]
+        origin = bytes(header[1:1 + ORIGIN_LEN])
+        epoch = header[4]
+        (seq,) = struct.unpack(">H", bytes(header[5:7]))
+        hops = min(header[_HOPS_OFFSET], MAX_HOPS)
+        fresh = self.seen.check((origin, epoch, seq))
+        self._stats["unwrapped_clear" if fresh else "duplicate"] += 1
+        return Inbound(origin, epoch, seq, hops, bytes(packet[HEADER_LEN:]), not fresh)
+
     # -- reporting ----------------------------------------------------------
 
     def stats(self):
@@ -548,6 +604,10 @@ class Mesh(object):
                 % (s.get("wrapped", 0), s.get("unwrapped", 0),
                    s.get("duplicate", 0), s.get("unauthenticated", 0),
                    s.get("foreign", 0), self._epoch))
+        if s.get("sent_clear") or s.get("unwrapped_clear") or s.get("clear_ignored"):
+            line += (" clear_sent=%d clear_heard=%d clear_ignored=%d"
+                     % (s.get("sent_clear", 0), s.get("unwrapped_clear", 0),
+                        s.get("clear_ignored", 0)))
         if s.get("wrong_version"):
             # Checked first: it is a strictly better explanation than the
             # passphrase one when both could apply, and the fix is different.
@@ -563,3 +623,7 @@ class Mesh(object):
 
 def is_mesh(packet):
     return bool(packet) and packet[0] == cot_codec.CTRL_MESH
+
+
+def is_clear(packet):
+    return bool(packet) and packet[0] == cot_codec.CTRL_CLEAR

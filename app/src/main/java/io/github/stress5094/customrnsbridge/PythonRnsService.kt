@@ -158,6 +158,7 @@ object PythonRnsService {
                 bridge.callAttr("set_transport", RadioLink.transport(context))
                 bridge.callAttr("set_radio_firmware", RadioLink.radioFirmware(context))
                 bridge.callAttr("set_fm_backup_enabled", RadioLink.fmBackupEnabled(context))
+                bridge.callAttr("set_fm_clear", RadioLink.fmClear(context))
                 // THE ORDERING MATTERS, which is why these belong here rather
                 // than after start(): a tone placement decides what BOTH the
                 // transmit burst and the receive modem are built with, and a

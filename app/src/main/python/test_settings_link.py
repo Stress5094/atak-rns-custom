@@ -144,19 +144,78 @@ class SettingsLinkTest(_Fixture):
     # -- FM settings (Phase C) ------------------------------------------------
 
     @staticmethod
-    def _kotlin(profile, spec=None, vox=False):
+    def _kotlin(profile, spec=None, vox=False, clear=None):
         import fm_custom
         if spec is None and profile == "custom":
             spec = fm_custom.parse_net_code(CODE500).to_json()
+        fm = {"profile": profile, "custom_spec": spec or "", "vox": vox}
+        if clear is not None:
+            fm["clear"] = clear
         return json.dumps({"coverage": {"fm_mhz": "146.000", "fm_w": "10",
                                         "tx_height_m": "1.5"},
-                           "fm": {"profile": profile, "custom_spec": spec or "",
-                                  "vox": vox}})
+                           "fm": fm})
 
-    def _fm_qr(self, profile, spec=None):
-        qr = self._j(sl.share_qr(json.dumps({"fm": True}), self._kotlin(profile, spec)))
+    def _fm_qr(self, profile, spec=None, clear=None):
+        qr = self._j(sl.share_qr(json.dumps({"fm": True}),
+                                 self._kotlin(profile, spec, clear=clear)))
         sl._fm.clear()
         return qr
+
+    # -- "send FM unencrypted" travels with the FM group -----------------------
+
+    def _restore_fm_clear(self):
+        saved = rb._fm_clear
+        self.addCleanup(rb.set_fm_clear, saved)
+
+    def test_fm_unencrypted_is_shared_and_applied_live(self):
+        self._restore_fm_clear()
+        rb.set_fm_clear(False)
+        self._j(sl.set_pin(PIN))
+        qr = self._fm_qr("fast", clear=True)
+        self.assertIn("fm_clear", [i["key"] for i in qr["items"]])
+        here = self._kotlin("fast", clear=False)
+        offer = self._j(sl.receive(qr["text"], "qr", here))
+        self.assertEqual({c["key"]: c["new"] for c in offer["changes"]},
+                         {"fm_clear": True})
+        self.assertTrue(all(c["network"] for c in offer["changes"]))
+        out = self._j(sl.approve(offer["host"], PIN, False, here))
+        self.assertEqual(out["outcome"], "applied")
+        self.assertTrue(rb._fm_clear)            # running now, no restart
+        self.assertIs(out["fm"]["clear"], True)  # and handed back to save
+        back = self._j(sl.undo(self._kotlin("fast", clear=True)))
+        self.assertEqual(back["problems"], [])
+        self.assertFalse(rb._fm_clear)
+        self.assertIs(back["fm"]["clear"], False)
+
+    def test_fm_unencrypted_off_is_shared_too(self):
+        self._restore_fm_clear()
+        rb.set_fm_clear(True)
+        self._j(sl.set_pin(PIN))
+        qr = self._fm_qr("fast", clear=False)
+        here = self._kotlin("fast", clear=True)
+        offer = self._j(sl.receive(qr["text"], "qr", here))
+        self._j(sl.approve(offer["host"], PIN, False, here))
+        self.assertFalse(rb._fm_clear)
+
+    def test_a_host_without_the_setting_shares_no_fm_clear(self):
+        qr = self._fm_qr("fast")
+        self.assertNotIn("fm_clear", [i["key"] for i in qr["items"]])
+
+    def test_a_phone_too_old_for_fm_clear_says_so(self):
+        self._restore_fm_clear()
+        rb.set_fm_clear(False)
+        self._j(sl.set_pin(PIN))
+        qr = self._fm_qr("fast", clear=True)
+        here = self._kotlin("fast")          # Kotlin sends no "clear"
+        offer = self._j(sl.receive(qr["text"], "qr", here))
+        out = json.loads(sl.approve(offer["host"], PIN, False, here))
+        self.assertIn("too old to send FM unencrypted", json.dumps(out))
+        self.assertFalse(rb._fm_clear)
+
+    def test_a_non_boolean_fm_clear_is_refused(self):
+        _, b = sl._get_host().bundles({"fm_clear": "yes"}, switch_in_s=None)
+        self.assertIn("not understood", json.loads(
+            sl.receive(b["qr"], "qr", self._kotlin("fast", clear=False)))["error"])
 
     def test_a_custom_fm_setting_is_shared_and_applied_live(self):
         import fm_link

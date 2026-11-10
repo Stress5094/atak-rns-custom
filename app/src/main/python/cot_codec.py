@@ -250,6 +250,13 @@ BUNDLE_MAX_FRAME = 255
 T_COMPACT_X = 0xB
 T_ZCOMPACT_X = 0xC
 
+# The mesh envelope WITHOUT encryption: the same 8-byte header as T_MESH, then
+# the inner frame in plain, and no tag. For a radio service where the content
+# must be readable by anyone listening (US amateur FM, Part 97.113(a)(4)), so
+# it is only ever produced for the FM link and only with the operator's "send
+# FM unencrypted" setting on -- see mesh.Mesh.to_clear().
+T_CLEAR = 0xD
+
 # Every spelling of "a compact CoT frame". Whether the dictionary was applied or
 # generic elements ride along says nothing about what the frame carries, so
 # anything deciding on the kind -- is this a bare position? -- tests this set.
@@ -268,6 +275,7 @@ CTRL_RELIABLE_TO = (PROTOCOL_VERSION << 4) | T_RELIABLE_TO
 CTRL_BUNDLE = (PROTOCOL_VERSION << 4) | T_BUNDLE
 CTRL_COMPACT_X = (PROTOCOL_VERSION << 4) | T_COMPACT_X
 CTRL_ZCOMPACT_X = (PROTOCOL_VERSION << 4) | T_ZCOMPACT_X
+CTRL_CLEAR = (PROTOCOL_VERSION << 4) | T_CLEAR
 
 
 class CotCodecError(Exception):

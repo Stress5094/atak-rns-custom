@@ -21,6 +21,9 @@ WHERE EACH SETTING LIVES
         Android refuses the restart trampoline, and live is what lets every
         phone change at the same moment. Only the NET settings travel (the
         net code); this phone's keying, lead-in, filter and copies stay.
+  fm_clear                                    KOTLIN's RadioLink.fmClear,
+        passed in as "fm" "clear" and handed back the same way. Applied live
+        through rns_bridge.set_fm_clear; travels with the FM group.
 
 Every entry point takes and returns JSON strings and never raises: the
 screens show {"error": ...} instead.
@@ -105,8 +108,13 @@ def _fm_current():
     # fm_custom always present ("" on a preset), so a before/after list and
     # the undo snapshot read "" rather than None.
     custom = _fm["profile"] == _fm_custom_mod().CUSTOM_NAME
-    return {"fm_profile": _fm["profile"],
-            "fm_custom": _stored_net_code() if custom else ""}
+    out = {"fm_profile": _fm["profile"],
+           "fm_custom": _stored_net_code() if custom else ""}
+    # Only once Kotlin says: a build without "send FM unencrypted" sends no
+    # "clear", and then the setting is neither shared from nor applied to it.
+    if "clear" in _fm:
+        out["fm_clear"] = bool(_fm["clear"])
+    return out
 
 
 def _fm_custom_mod():
@@ -164,7 +172,22 @@ def _apply_fm(settings):
     if got != name:
         return "FM: the link did not take %s (it is on %r)" % (name, got)
     _fm.update(profile=name, custom_spec=spec_json)
-    _fm_out = {"profile": name, "custom_spec": spec_json}
+    _fm_out = dict(_fm_out or {}, profile=name, custom_spec=spec_json)
+    return None
+
+
+def _apply_fm_clear(settings):
+    """One problem string, or None. Switches the running bridge and leaves the
+    value in _fm_out (merged with any profile change) for Kotlin to save."""
+    global _fm_out
+    if "clear" not in _fm:
+        return "this phone's app is too old to send FM unencrypted"
+    want = bool(settings["fm_clear"])
+    if want == bool(_fm["clear"]):
+        return None
+    _bridge().set_fm_clear(want)
+    _fm["clear"] = want
+    _fm_out = dict(_fm_out or {}, clear=want)
     return None
 
 
@@ -190,6 +213,10 @@ def _apply(settings):
         problem = _apply_fm(settings)
         if problem:
             problems.append(problem)
+    if "fm_clear" in settings:
+        problem = _apply_fm_clear(settings)
+        if problem:
+            problems.append("FM: " + problem)
     if "coverage" in settings:
         import coverage
         merged = dict(_coverage)
@@ -357,6 +384,8 @@ def _fm_to_share(opts, cur):
             raise ss.Refused("This phone's custom FM settings cannot be used, "
                              "so they cannot be shared")
         out["fm_custom"] = cur["fm_custom"]
+    if "fm_clear" in cur:
+        out["fm_clear"] = cur["fm_clear"]
     return out
 
 
