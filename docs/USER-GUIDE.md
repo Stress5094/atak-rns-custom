@@ -244,6 +244,11 @@ prediction and hasn't been checked against measured range.
 - **Streets view / Satellite view:** switches the base map.
 - **Download an area for offline use:** drag a box to download map and
   building data before going out of coverage.
+  - The app shows the size and an estimate (in MB) and asks before
+    downloading. **Cancel download** stops drawing the box.
+  - While it downloads, the button reads **Stop download**. Stopping saves
+    nothing and keeps the area you downloaded before.
+  - A finished download replaces your previous downloaded area.
 - **Long-press the map:** compute coverage from another point, or delete
   saved ones.
 - Other nodes' coverage can be drawn from their reported positions.

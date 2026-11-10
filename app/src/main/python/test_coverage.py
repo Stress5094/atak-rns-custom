@@ -675,6 +675,42 @@ class AreaReplacementTest(unittest.TestCase):
         self.assertIn("error", r)
         self.assertEqual(self._files("overture_"), before)
 
+    def test_stopped_download_keeps_the_old_area(self):
+        coverage.download_area("20.8575", "-140.4733", "20.8775", "-140.4533")
+        before = self._files("overture_")
+        calls = []
+
+        def slow(s, w, n, e, progress=None):
+            # The operator taps Stop part-way: the next tile's progress call
+            # must end the download.
+            progress(1, 4)
+            calls.append(1)
+            coverage.stop_download()
+            progress(2, 4)
+            calls.append(2)
+            return [], [], "2026-test"
+        coverage.overture_tiles.fetch_area = slow
+        r = json.loads(coverage.download_area("20.9175", "-140.5133", "20.9375", "-140.4933"))
+        self.assertEqual(r, {"stopped": True})
+        self.assertEqual(calls, [1])
+        self.assertEqual(self._files("overture_"), before)
+        self.assertEqual([f for f in os.listdir(self._tmp.name) if f.endswith(".part")], [])
+        self.assertFalse(json.loads(coverage.download_progress())["active"])
+
+    def test_a_stop_does_not_carry_over_to_the_next_download(self):
+        coverage.stop_download()   # tapped with nothing running
+        r = json.loads(coverage.download_area("20.9175", "-140.5133", "20.9375", "-140.4933"))
+        self.assertNotIn("stopped", r)
+        self.assertNotIn("error", r)
+
+    def test_stop_never_touches_automatic_downloads(self):
+        coverage._stop_download.set()
+        try:
+            coverage._auto_overture(21.0175, -140.6133)
+        finally:
+            coverage._stop_download.clear()
+        self.assertEqual(len(self._files("auto_")), 1)
+
     def test_auto_area_without_names_is_refetched(self):
         with open(os.path.join(self._tmp.name, "auto_old.json"), "w") as f:
             json.dump({"south": 20.3175, "west": -141.4133, "north": 21.3175, "east": -140.4133,

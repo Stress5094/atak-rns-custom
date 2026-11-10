@@ -230,6 +230,7 @@ class MainActivity : AppCompatActivity() {
     // long-pressing inside it now.)
     private lateinit var coverageDownloadButton: Button
     private var coverageStatusBeforeSelect: CharSequence? = null
+    private var coverageDownloading = false
     private lateinit var coveragePeerStatus: TextView
     private lateinit var coveragePeerToggle: android.widget.CompoundButton
     // Guards against stacking coverage runs: the fetch + compute is seconds
@@ -697,7 +698,7 @@ class MainActivity : AppCompatActivity() {
         box.addView(row1)
 
         val row2 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        coverageDownloadButton = smallButton("Download an area for offline use") { toggleSelectMode() }
+        coverageDownloadButton = smallButton("Download an area for offline use") { onDownloadButton() }
         row2.addView(coverageDownloadButton)
         box.addView(row2)
 
@@ -1118,6 +1119,19 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** One button, three jobs: start drawing a box, cancel the drawing, or
+     *  stop a download that is running. */
+    private fun onDownloadButton() {
+        if (coverageDownloading) {
+            coverageDownloadButton.isEnabled = false
+            coverageDownloadButton.text = "Stopping…"
+            // Not coverageExecutor: that thread is the one busy downloading.
+            executor.execute { PythonRnsService.callModule("coverage", "stop_download") }
+        } else {
+            toggleSelectMode()
+        }
+    }
+
     private fun toggleSelectMode() {
         val on = !coverageMap.selectMode
         coverageMap.selectMode = on
@@ -1186,7 +1200,9 @@ class MainActivity : AppCompatActivity() {
         val sel = coverageMap.currentSelection() ?: return
         if (coverageComputing) return
         coverageComputing = true
-        coverageDownloadButton.isEnabled = false
+        coverageDownloading = true
+        // Stays tappable: it is the way to stop the download.
+        coverageDownloadButton.text = "Stop download"
         coverageStatus.text = "Downloading Overture buildings and streets…"
         val poll = startCoverageProgressPoll()
         coverageExecutor.execute {
@@ -1196,10 +1212,17 @@ class MainActivity : AppCompatActivity() {
             )
             handler.post {
                 coverageComputing = false
+                coverageDownloading = false
                 coverageDownloadButton.isEnabled = true
                 handler.removeCallbacks(poll)
                 if (coverageMap.selectMode) toggleSelectMode()
+                coverageDownloadButton.text = "Download an area for offline use"
                 val obj = try { json?.let { JSONObject(it) } } catch (e: Exception) { null }
+                if (obj != null && obj.optBoolean("stopped")) {
+                    coverageStatus.text = "Download stopped. Nothing was saved; the area " +
+                        "you downloaded before is kept."
+                    return@post
+                }
                 if (obj == null || obj.has("error")) {
                     coverageStatus.text = "Download failed: ${obj?.optString("error") ?: "bridge not up"}"
                     return@post
