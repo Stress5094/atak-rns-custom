@@ -63,9 +63,17 @@ rebuild.
 
 ## 3. Connecting the radio
 
-Everything here lives under **Status → Radio link**.
+Everything here lives in **Radio link**: tap any of the link buttons on the
+Status tab. While the bridge isn't running, a **Radio link** button appears
+there instead.
 
-**Choosing the connection**
+The dialog asks two questions:
+
+- **Radio:** **RNode**, **Meshtastic board**, or **FM radio only** (an FM
+  handheld through a Digirig, with no LoRa radio).
+- **Connection** (for RNode or Meshtastic): **USB cable** or **Bluetooth**.
+
+**Connecting**
 
 - **USB cable:** plug the radio in, then accept Android's prompt. Tick
   "always open with this app", because some boards restart after a settings
@@ -82,8 +90,9 @@ Everything here lives under **Status → Radio link**.
   the code is shown to type in by hand. The radio stays in pairing mode for
   about a minute.
 
-  **Pairing by hand** (no cable, or two radios side by side): tap
-  **Bluetooth**, **Scan for radios**, then tap the radio and **Pair**.
+  **Pairing by hand** (no cable, or two radios side by side): pick
+  **Bluetooth** under Connection, tap **Scan for radios**, then tap the radio
+  and **Pair**.
   - If that radio is on this phone's cable, the app puts it into pairing
     mode and fills in the code, as above.
   - Otherwise, first hold the radio's button for 5 seconds to put it into
@@ -93,19 +102,17 @@ Everything here lives under **Status → Radio link**.
   Bluetooth radios don't appear in Android's own Bluetooth settings, which is
   why the scan is inside the app. Over Bluetooth the radio needs its own
   battery.
-- **The board runs Meshtastic firmware (not RNode):** tick this for a
-  Meshtastic board. The *LoRa settings* button on the Status tab then opens the
-  [Meshtastic board](#meshtastic-board) dialog instead of the RNode one.
-- **FM audio (USB):** use a Digirig and an FM handheld. See the FM options
+- **Meshtastic board:** Network settings then also offers **Meshtastic board
+  settings…**, which opens the [Meshtastic board](#meshtastic-board) dialog.
+- **FM radio only:** use a Digirig and an FM handheld. See the FM options
   below.
 
 **Options on the same screen**
 
 - **Use FM as automatic backup:** builds the FM link next to LoRa. FM then
   takes over if LoRa fails (see [section 8](#8-routing-which-radio-carries-what)).
-- **Which radio:** when more than one radio is paired, choose which one this
-  phone uses. With two paired and none chosen, the app waits rather than
-  guessing.
+- **Which radio:** with one radio paired, it is picked for you. With several,
+  tap the one this phone should use; Save asks you to pick one.
 
 **Advanced options.** These only appear after you turn on *Advanced → Show
 advanced features*. Turning the switch off hides them again but keeps their
@@ -128,8 +135,8 @@ values.
   radio name, phone name, and who it can hear. Off by default. The same
   button gives the screen back to the radio.
 
-The **Radio link** button always names the link actually in use, and says
-`(restart to apply)` while a saved change hasn't taken effect yet.
+The line above the link buttons says **restart to apply** while a saved
+change hasn't taken effect yet.
 
 ## 4. Connecting ATAK
 
@@ -159,14 +166,18 @@ The tab you use day to day.
 
 - **Identity:** this node's id. The radio's name appears when connected over
   Bluetooth.
-- **Network key:** a four-character fingerprint of the passphrase. It must be
-  the same on every phone. A wrong passphrase and a dead radio look the same
-  from one phone, so compare fingerprints first.
+- **Network key line:** for example `Network key 3f9a · Short Slow · 915.000
+  MHz`. The four-character key is a fingerprint of the passphrase. Everything
+  on this line must be the same on every phone. A wrong passphrase and a dead
+  radio look the same from one phone, so compare this line first.
 - **Health line:**
-  - *Radio ok* / *No radio*
+  - *Radio ok* / *No radio*: the radio carrying traffic now. When FM is the
+    active link, this shows FM's receive state instead (table below).
   - *ATAK ok* / *No ATAK*
   - *Mesh N* (number of connected peers) / *No peers*
-- **FM receive health** (when FM is on):
+- **FM receive health** (when FM is on): shown on the FM link button, for
+  example *FM · backup · no audio*, and on the health line when FM is the
+  active link.
 
   | Reading | Meaning | What to do |
   |---|---|---|
@@ -180,7 +191,8 @@ The tab you use day to day.
   - *backup* (outlined): set up and listening, ready to take over.
   - *off* (dimmed): not set up.
   - The WiFi button only appears when Wi-Fi is on or advanced features are on.
-  - Tap any of them to open **Radio link**.
+  - Tap any of them to open **Radio link** (the line above says *Links · tap
+    to change*).
   - If a link has been forced from the Advanced tab, a warning line says so.
 - **Tiles:**
   - **Airtime:** this node's share of the channel. A warning shows above 30%.
@@ -192,11 +204,9 @@ The tab you use day to day.
   (SNR) and loss on direct links. "Connected" means a frame from that phone
   actually crossed the air in the last three beacon intervals.
 - **Buttons:**
-  - [Passphrase](#passphrase)
-  - [LoRa settings](#lora-settings-rnode)
-  - [Radio link](#3-connecting-the-radio)
+  - [Network settings](#network-settings): passphrase, LoRa preset,
+    frequency and power
   - **Share settings** (shows a QR code) / **Scan QR** ([section 11](#11-sharing-settings-with-a-team))
-  - **Restart bridge**
   - **Quit app**, which stops the service fully
 
 ### Advanced
@@ -208,8 +218,10 @@ Bench and field-test tools.
     Status tab work either way. With the tab hidden, settings offers that
     arrive over Wi-Fi open as a dialog instead.
   - **Show detailed status on the Status tab:** off by default. When off, the
-    Status tab hides its informational lines: the build stamp, the FM net
-    code and settings, the FM receive summary and the re-send counts.
+    Status tab hides its informational lines: the build stamp, the full radio
+    line, the FM net code and settings, the FM receive summary, the re-send
+    counts and the **Diagnostics** section (channel noise and the position
+    policy counters).
     Warnings always show, including which way to turn the volume knob.
   - **Link:** **Auto** lets the app choose. **Force LoRa / Force FM / Force
     WiFi** pins one link after you confirm. Health is still measured
@@ -228,10 +240,14 @@ Bench and field-test tools.
     and carry the sender's GPS fix. Every beacon heard is logged with both
     positions, the distance, signal strength and the age of each fix. Rows
     whose fix is too old are marked unusable rather than trusted.
-  - **Export range test:** saves the CSV to Downloads.
-- **Audio bench:**
+    **Stopping the test saves the CSV to Downloads.**
+- **Audio bench** (only while FM is in use):
   - **Test tone (10 s):** plays a tone through the FM cable to check the audio
     path. It sends no mesh traffic.
+- **Bridge:**
+  - **Restart bridge:** stops the radio, ATAK connection and mesh, then starts
+    them again. Rarely needed by hand: the app offers a restart itself
+    whenever a change needs one.
 
 ### Network → Mesh
 
@@ -282,18 +298,22 @@ Settings sharing between phones. See [section 11](#11-sharing-settings-with-a-te
 
 ## 6. Settings dialogs
 
-### Passphrase
+### Network settings
 
-The network key. Every phone on a network must use exactly the same
-passphrase.
+Everything every phone on the network must match, in one dialog.
 
-- **Set** saves it.
-- **Generate** fills in six random words joined by dashes (about 62 bits). It
-  doesn't save until you tap **Set**.
-- There is **no default**. A phone with no passphrase makes up its own and
-  stays alone, rather than joining a network anyone could read.
+- **Passphrase:** the network key. Hidden as dots; tap the eye to show it, to
+  read it out or copy it to another phone.
+  - **New passphrase** fills in six random words joined by dashes (about 62
+    bits). Nothing changes until you tap **Apply**.
+  - There is **no default**. A phone with no passphrase makes up its own and
+    stays alone, rather than joining a network anyone could read.
+- **LoRa preset, Frequency, Transmit power:** as below.
+- **Meshtastic board settings…** (Meshtastic radio only): opens the
+  [Meshtastic board](#meshtastic-board) dialog.
+- **Apply** changes only what you changed.
 
-### LoRa settings (RNode)
+The radio settings in detail:
 
 - **Preset:** eight presets, named as in Meshtastic. Every node must use the
   same one.
@@ -330,7 +350,8 @@ across the whole mesh.
 
 ### Meshtastic board
 
-Opened from *Status → LoRa settings* when the radio link is set to Meshtastic.
+Opened from *Network settings → Meshtastic board settings…* when the radio is
+a Meshtastic board.
 
 - **Use the app's settings:** the recommended choice. It puts the board on the
   app's preset, frequency and power, derives the channel name and key from
@@ -680,7 +701,7 @@ changes at once and nobody is left on the old settings
 | FM *Garbled* | Receive volume wrong. Follow the level readout. Too high is as bad as too low. |
 | FM *Silent* | Radio off, squelch closed, or cable unplugged. |
 | A message under *Messages* / *Undelivered* | It got no acknowledgement after every retry. Resend, or move closer. |
-| High *Airtime* | Too many nodes or too slow a preset. See the preset table in [section 6](#lora-settings-rnode). |
+| High *Airtime* | Too many nodes or too slow a preset. See the preset table in [section 6](#network-settings). |
 
 For a field problem, use *Advanced → Start log*, reproduce the problem, then
 *Export*.
