@@ -416,6 +416,22 @@ class SeenCache(object):
         except Exception:
             return True
 
+    def contains(self, frame_id):
+        """True if the id is currently remembered. READ-ONLY: expires old
+        entries but never inserts, so asking cannot change what a later check()
+        says. Never raises; failing open (False) costs a duplicate."""
+        try:
+            with self._lock:
+                now = self._clock()
+                while self._seen:
+                    key, seen_at = next(iter(self._seen.items()))
+                    if now - seen_at < self.ttl_s:
+                        break
+                    self._seen.pop(key)
+                return frame_id in self._seen
+        except Exception:
+            return False
+
     def forget(self, frame_id):
         """Drop a frame id, so the next copy of it reads as new again.
 
@@ -448,7 +464,7 @@ class Mesh(object):
 
     def __init__(self, node_id, key, epoch=0, on_epoch_change=None,
                  seen=None, clock=time.monotonic, exhausted=None,
-                 counter_reset=False):
+                 counter_reset=False, seen_clear=None):
         if not HAVE_AEAD:
             raise MeshError(
                 "no AEAD backend: the cryptography package is required "
@@ -468,7 +484,14 @@ class Mesh(object):
         self._seq = 0
         self._on_epoch_change = on_epoch_change
         self._seq_lock = threading.Lock()
+        # Authenticated (T_MESH) frames only. Nothing unauthenticated may ever
+        # write here, or a keyless attacker could pre-claim a victim's upcoming
+        # (origin, epoch, seq) or flush the cache to reopen replay.
         self.seen = seen if seen is not None else SeenCache(clock=clock)
+        # Unauthenticated (T_CLEAR) frames only; same defaults. See
+        # _unwrap_clear for the one read-only look it takes at `seen`.
+        self.seen_clear = (seen_clear if seen_clear is not None
+                           else SeenCache(clock=clock))
         self._stats = collections.Counter()
         # Rejections since the last frame that verified. The cumulative
         # `unauthenticated` total cannot answer "is the key wrong RIGHT NOW":
@@ -681,7 +704,28 @@ class Mesh(object):
     def _unwrap_clear(self, packet):
         """unwrap() for an unencrypted frame: accepted only when this node has
         opted in (accept_clear); otherwise the same non-event as a foreign
-        network's frame."""
+        network's frame.
+
+        Clear frames are deduplicated in their OWN cache (`seen_clear`) and
+        never write to the sealed one: anyone can mint a clear frame with any
+        (origin, epoch, seq), so sharing a cache let a keyless attacker either
+        pre-claim a victim's upcoming sealed frame id (the real frame then read
+        as a duplicate and was dropped) or flood 512 distinct clear frames to
+        evict sealed entries and reopen short-horizon replay.
+
+        One deliberate read-only look the other way: with fm_clear on and LoRa
+        active, the same frame goes out sealed on LoRa and (stripped by
+        to_clear, same header) clear on FM, and a dual-link receiver used to
+        suppress the second copy through the shared cache. So after the clear
+        frame passes its own cache, `seen.contains()` is asked whether the
+        SEALED copy was already heard, and if so this one is marked duplicate.
+        That is a membership test only; a clear frame can never write or
+        pre-claim sealed state.
+
+        Residual: if the clear copy arrives FIRST, the sealed copy is still
+        delivered, so a dual-link clear net can occasionally deliver one frame
+        twice. Accepted -- the alternative is the poisoning attack above.
+        """
         if not self.accept_clear:
             self._stats["clear_ignored"] += 1
             return None
@@ -693,7 +737,10 @@ class Mesh(object):
         epoch = header[4]
         (seq,) = struct.unpack(">H", bytes(header[5:7]))
         hops = min(header[_HOPS_OFFSET], MAX_HOPS)
-        fresh = self.seen.check((origin, epoch, seq))
+        frame_id = (origin, epoch, seq)
+        fresh = self.seen_clear.check(frame_id)
+        if fresh and self.seen.contains(frame_id):
+            fresh = False
         self._stats["unwrapped_clear" if fresh else "duplicate"] += 1
         return Inbound(origin, epoch, seq, hops, bytes(packet[HEADER_LEN:]), not fresh)
 
@@ -702,6 +749,7 @@ class Mesh(object):
     def stats(self):
         out = dict(self._stats)
         out["seen"] = len(self.seen)
+        out["seen_clear"] = len(self.seen_clear)
         out["epoch"] = self._epoch
         out["counter"] = self._counter
         out["seq"] = self._seq
