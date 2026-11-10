@@ -663,8 +663,8 @@ class MainActivity : AppCompatActivity() {
         })
         box.addView(pickerRow)
 
-        // Three to a row: less side padding than a lone button, so a label
-        // like "Recompute" stays whole instead of breaking mid-word.
+        // Less side padding than a lone button, so a label stays whole
+        // instead of breaking mid-word.
         fun smallButton(label: String, onClick: () -> Unit) = Ui.outlined(this, label).apply {
             setPadding(dp(8), paddingTop, dp(8), paddingBottom)
             maxLines = 2
@@ -673,9 +673,11 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener { onClick() }
         }
 
-        // Picking another radio recomputes by itself (the listener above);
-        // a pick made while a run is going is queued, not raced -- see
-        // coverageRecomputeWanted. Recompute stays for a run on demand.
+        // No Recompute button (removed 2026-11-10): coverage recomputes by
+        // itself on opening the tab, a radio pick, a Model save, a long-press,
+        // a finished download and 100 m of movement; My location is the retry
+        // after a failed run. A pick made while a run is going is queued, not
+        // raced -- see coverageRecomputeWanted.
         val row1 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         row1.addView(smallButton("My location") {
             coverageTx = null
@@ -684,7 +686,6 @@ class MainActivity : AppCompatActivity() {
             coverageFix = null
             refreshCoverage()
         })
-        row1.addView(smallButton("Recompute") { refreshCoverage() })
         // Hybrid (satellite + street names) is the default view; the choice
         // is kept across reboots.
         row1.addView(smallButton(
