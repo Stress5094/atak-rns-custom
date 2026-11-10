@@ -341,6 +341,17 @@ object RadioLink {
         prefs(context).edit().putBoolean(KEY_STATUS_DETAILS, on).apply()
     }
 
+    /** Debug → Advanced features → "Show the Share tab". Off by default:
+     * the bottom bar then has four tabs. Share QR / Scan QR stay on Status. */
+    private const val KEY_SHARE_TAB = "share_tab"
+
+    fun shareTabEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_SHARE_TAB, false)
+
+    fun setShareTabEnabled(context: Context, on: Boolean) {
+        prefs(context).edit().putBoolean(KEY_SHARE_TAB, on).apply()
+    }
+
     /** Bluetooth address of the chosen radio, or null to use the only paired one. */
     fun bleAddress(context: Context): String? =
         prefs(context).getString(KEY_BLE_ADDRESS, null)
