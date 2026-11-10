@@ -1329,6 +1329,25 @@ def _set_progress(**kw):
         _progress.update(kw)
 
 
+class DownloadStopped(Exception):
+    """The operator tapped Stop download. Raised from the progress callback,
+    so the fetch unwinds before anything is saved and the old area stays."""
+
+
+# Set by stop_download() from the UI thread, read between tiles by the
+# download thread. Only the operator's own download (download_area) checks
+# it: the automatic and other-node fetches are not theirs to stop.
+_stop_download = threading.Event()
+
+
+def stop_download():
+    """Kotlin entry point: ask a running download_area() to stop. It stops
+    after the tile in flight, at most a few seconds. JSON {"ok": true}."""
+    _stop_download.set()
+    _set_progress(stage="Stopping")
+    return json.dumps({"ok": True})
+
+
 def download_progress():
     """JSON {active, done, total, stage}. Polled by Kotlin while
     download_area() runs on another thread -- Chaquopy calls cannot stream."""
@@ -1372,7 +1391,7 @@ def _normalise_box(south_s, west_s, north_s, east_s):
 
 
 def _fetch_and_save(S, W, N, E, selected, prefix, label, keep=1, report=True,
-                    timing=None):
+                    timing=None, stoppable=False):
     """Download Overture buildings + streets + terrain for (S, W, N, E) and
     save them as a bundle. Returns (file name or None, buildings, roads,
     road_names, release). With no storage directory the data is returned
@@ -1388,7 +1407,12 @@ def _fetch_and_save(S, W, N, E, selected, prefix, label, keep=1, report=True,
     t0 = time.monotonic()
     say(active=True, done=0, total=0, stage="Reading Overture index")
 
+    def check_stop():
+        if stoppable and _stop_download.is_set():
+            raise DownloadStopped()
+
     def progress(done, total):
+        check_stop()
         say(done=done, total=total, stage="Downloading map tiles")
 
     buildings, pairs, release = overture_tiles.fetch_area(S, W, N, E, progress)
@@ -1402,8 +1426,10 @@ def _fetch_and_save(S, W, N, E, selected, prefix, label, keep=1, report=True,
     # deleting an area leaves it in place.
     keys = terrain_keys_for_box(S, W, N, E)
     for i, key in enumerate(keys):
+        check_stop()
         say(done=i, total=len(keys), stage="Downloading terrain")
         Terrain._load(key)
+    check_stop()
     t2 = time.monotonic()
     timing["terrain_fetch_s"] = round(t2 - t1, 2)
     if not _BUNDLED_DIR:
@@ -1462,8 +1488,9 @@ def download_area(south_s, west_s, north_s, east_s):
             return json.dumps({"error": "no storage directory for downloaded areas"})
         s, w, n, e = _normalise_box(south_s, west_s, north_s, east_s)
         S, W, N, E = _area_bbox_with_margin(s, w, n, e)
+        _stop_download.clear()
         name, buildings, roads, _, release = _fetch_and_save(
-            S, W, N, E, (s, w, n, e), "overture", "phone")
+            S, W, N, E, (s, w, n, e), "overture", "phone", stoppable=True)
         # Anything computed before this area existed used OSM (or nothing);
         # drop it so the next compute() at these spots reads the new data.
         _coverage_cache.clear()
@@ -1475,9 +1502,13 @@ def download_area(south_s, west_s, north_s, east_s):
             "south": s, "west": w, "north": n, "east": e,
             "size_kb": int(os.path.getsize(os.path.join(_BUNDLED_DIR, name)) / 1024),
         })
+    except DownloadStopped:
+        # Nothing was saved, so the previously downloaded area is untouched.
+        return json.dumps({"stopped": True})
     except Exception as e:  # noqa: BLE001 -- the tab must get a reason, not a trace
         return json.dumps({"error": "%s: %s" % (type(e).__name__, e)})
     finally:
+        _stop_download.clear()
         _set_progress(active=False)
 
 
