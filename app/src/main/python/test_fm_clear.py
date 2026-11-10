@@ -90,6 +90,75 @@ class TestClearEnvelope(unittest.TestCase):
         self.assertEqual(b.unwrap(a.wrap(INNER)).frame, INNER)
 
 
+class TestClearAndSealedCachesAreSeparate(unittest.TestCase):
+    """A keyless attacker on a clear-mode net can mint clear frames with any
+    (origin, epoch, seq). Those must never write to the sealed duplicate cache."""
+
+    def setUp(self):
+        self.sender = mesh.Mesh(A, key(), epoch=9)
+        self.rx = mesh.Mesh(B, key())
+        self.rx.accept_clear = True
+
+    def _forged_clear(self, origin, epoch, seq, hops=0):
+        header = (bytes([cot_codec.CTRL_CLEAR]) + origin + bytes([epoch])
+                  + seq.to_bytes(2, "big") + bytes([hops]))
+        return header + INNER
+
+    def test_a_forged_clear_frame_cannot_pre_claim_a_sealed_id(self):
+        sealed = self.sender.wrap(INNER)
+        epoch, seq = sealed[4], int.from_bytes(sealed[5:7], "big")
+        poisoned = self.rx.unwrap(self._forged_clear(A, epoch, seq))
+        self.assertFalse(poisoned.duplicate)
+        got = self.rx.unwrap(sealed)
+        self.assertIsNotNone(got)
+        self.assertFalse(got.duplicate)  # the attack used to make this True
+        self.assertEqual(got.frame, INNER)
+
+    def test_flooding_clear_frames_does_not_evict_sealed_entries(self):
+        sealed = self.sender.wrap(INNER)
+        self.assertFalse(self.rx.unwrap(sealed).duplicate)
+        for i in range(mesh.DEFAULT_MAX_SEEN * 2):
+            self.rx.unwrap(self._forged_clear(b"\xee\xee\xee", i & 0xFF, i))
+        self.assertEqual(len(self.rx.seen), 1)
+        self.assertEqual(len(self.rx.seen_clear), mesh.DEFAULT_MAX_SEEN)
+        self.assertTrue(self.rx.unwrap(sealed).duplicate)  # still remembered
+
+    def test_dual_link_sealed_first_then_clear_copy_is_a_duplicate(self):
+        sealed = self.sender.wrap(INNER)
+        clear = self.sender.to_clear(sealed)
+        self.assertFalse(self.rx.unwrap(sealed).duplicate)
+        got = self.rx.unwrap(clear)
+        self.assertTrue(got.duplicate)
+
+    def test_the_cross_check_never_writes_sealed_state(self):
+        sealed = self.sender.wrap(INNER)
+        clear = self.sender.to_clear(sealed)
+        self.rx.unwrap(clear)
+        self.assertEqual(len(self.rx.seen), 0)
+        # Clear first: the sealed copy is still delivered (documented residual).
+        self.assertFalse(self.rx.unwrap(sealed).duplicate)
+
+    def test_clear_duplicate_of_clear_is_still_a_duplicate(self):
+        clear = self.sender.to_clear(self.sender.wrap(INNER))
+        self.assertFalse(self.rx.unwrap(clear).duplicate)
+        self.assertTrue(self.rx.unwrap(clear).duplicate)
+
+    def test_contains_is_read_only(self):
+        cache = mesh.SeenCache()
+        self.assertFalse(cache.contains(("x", 1, 2)))
+        self.assertTrue(cache.check(("x", 1, 2)))  # contains() did not claim it
+        self.assertTrue(cache.contains(("x", 1, 2)))
+
+    def test_forget_stays_sealed_only(self):
+        sealed = self.sender.wrap(INNER)
+        clear = self.sender.to_clear(sealed)
+        self.rx.unwrap(sealed)
+        self.rx.unwrap(clear)
+        self.rx.seen.forget((A, sealed[4], int.from_bytes(sealed[5:7], "big")))
+        self.assertEqual(len(self.rx.seen), 0)
+        self.assertEqual(len(self.rx.seen_clear), 1)
+
+
 class FakeIface(object):
     def __init__(self):
         self.sent = []
