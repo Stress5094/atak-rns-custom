@@ -196,6 +196,29 @@ class RadioLinkDialog(
             text = "FM audio (USB)"
             isChecked = transport == RadioLink.TRANSPORT_FM
         }
+        // One tap from cable to Bluetooth (BluetoothSetup). Offered only while
+        // an RNode is running on the cable, because every step goes over it.
+        if (RadioLink.transport(activity) == RadioLink.TRANSPORT_USB &&
+            !RadioLink.isMeshtastic(activity) && !RadioLink.pendingRestart(activity)) {
+            body.addView(Ui.filled(activity, "Switch to Bluetooth").apply {
+                setOnClickListener {
+                    BluetoothSetup(activity) { address, name ->
+                        transport = RadioLink.TRANSPORT_BLE
+                        meshtastic = false
+                        chosenAddress = address
+                        chosenName = name
+                        save()
+                    }.start()
+                }
+            })
+            body.addView(TextView(activity).apply {
+                text = "Turns on the radio's Bluetooth, pairs it with this phone and " +
+                    "switches over. Keep the radio on the cable until the bridge has restarted."
+                textSize = 12f
+                setTextColor(COLOR_IDLE)
+                setPadding(0, dp(2), 0, dp(10))
+            })
+        }
         group.addView(usbButton)
         group.addView(bleButton)
         group.addView(fmButton)
@@ -777,6 +800,7 @@ class RadioLinkDialog(
                     .setMessage(message)
                     .setNegativeButton("Not now", null)
                     .setPositiveButton("Pair") { _, _ ->
+                        if (pin.isNotEmpty()) autoEnterPin(device, pin)
                         if (!device.createBond()) {
                             Toast.makeText(
                                 activity, "Android refused to start pairing", Toast.LENGTH_LONG
