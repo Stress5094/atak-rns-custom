@@ -543,15 +543,17 @@ class TestReplay(unittest.TestCase):
         self.assertTrue(again.duplicate)
         self.assertEqual(again.frame, INNER)
 
-    def test_replay_is_only_suppressed_inside_the_cache_window(self):
-        # Honest about the limit: past the TTL the cache cannot help, which is
-        # why the caller also checks the decoded event's timestamp.
+    def test_replay_past_the_cache_ttl_is_still_not_fresh(self):
+        # CHANGED by the replay-window fix: this used to assert that past the
+        # TTL the cache forgot the frame and a replay was accepted as fresh
+        # (`assertFalse(duplicate)`). The per-origin ReplayWindow now remembers
+        # it, so the replay comes back as a duplicate. See TestReplayWindow.
         clock = FakeClock()
         rx = mesh.Mesh(PEER, key(), seen=mesh.SeenCache(ttl_s=300.0, clock=clock))
         packet = node(ME).wrap(INNER)
         rx.unwrap(packet)
         clock.advance(301.0)
-        self.assertFalse(rx.unwrap(packet).duplicate)
+        self.assertTrue(rx.unwrap(packet).duplicate)
 
     def test_rewriting_hops_does_not_evade_duplicate_detection(self):
         # hops is unauthenticated, so it is the obvious thing to change when
@@ -794,6 +796,166 @@ class TestPipeline(unittest.TestCase):
         self.assertNotIn(b"ANDROID-1", on_air)
         self.assertNotIn(b"37.4219", on_air)
         self.assertIsNone(node(PEER, passphrase="wrong").unwrap(on_air))
+
+
+@skip_without_backend
+class TestReplayWindow(unittest.TestCase):
+    """Per-origin replay window: what the 300 s SeenCache cannot do."""
+
+    def setUp(self):
+        self.clock = FakeClock()
+        self.sender = node(ME, epoch=5)
+        self.rx = mesh.Mesh(PEER, key(),
+                            seen=mesh.SeenCache(ttl_s=300.0, clock=self.clock))
+
+    def _frames(self, n):
+        return [self.sender.wrap(INNER) for _ in range(n)]
+
+    def _not_fresh(self, got):
+        return got is None or got.duplicate
+
+    def test_replay_older_than_the_ttl_is_rejected(self):
+        packets = self._frames(3)
+        for p in packets:
+            self.assertFalse(self.rx.unwrap(p).duplicate)
+        self.clock.advance(3600.0)
+        self.assertTrue(self._not_fresh(self.rx.unwrap(packets[0])))
+
+    def test_a_replay_far_behind_the_window_is_dropped_outright(self):
+        packets = self._frames(mesh.REPLAY_WINDOW + 5)
+        for p in packets:
+            self.rx.unwrap(p)
+        self.clock.advance(3600.0)
+        self.assertIsNone(self.rx.unwrap(packets[0]))
+        self.assertEqual(self.rx.stats()["replayed"], 1)
+        self.assertIn("replayed=1", self.rx.summary_line())
+
+    def test_the_edge_of_the_window(self):
+        packets = self._frames(mesh.REPLAY_WINDOW + 1)
+        self.rx.unwrap(packets[-1])               # high = W
+        self.assertIsNone(self.rx.unwrap(packets[0]))   # W behind: out
+        self.assertFalse(self.rx.unwrap(packets[1]).duplicate)  # W-1 behind: in
+
+    def test_out_of_order_inside_the_window_is_accepted_once(self):
+        packets = self._frames(10)
+        self.rx.unwrap(packets[9])
+        got = self.rx.unwrap(packets[3])
+        self.assertFalse(got.duplicate)
+        self.assertEqual(got.frame, INNER)
+        self.assertTrue(self.rx.unwrap(packets[3]).duplicate)
+        self.assertTrue(self.rx.unwrap(packets[9]).duplicate)
+
+    def test_a_duplicate_is_delivered_as_duplicate_not_none(self):
+        # The relay layer's passive cancellation depends on this.
+        p = self._frames(1)[0]
+        self.rx.unwrap(p)
+        again = self.rx.unwrap(p)
+        self.assertIsNotNone(again)
+        self.assertTrue(again.duplicate)
+
+    def test_a_joining_receiver_accepts_earlier_seqs_inside_the_window(self):
+        packets = self._frames(20)
+        self.assertFalse(self.rx.unwrap(packets[15]).duplicate)
+        self.assertFalse(self.rx.unwrap(packets[2]).duplicate)
+
+    def test_epoch_restart_plus_one_and_plus_five_are_accepted(self):
+        for step in (1, 5):
+            rx = mesh.Mesh(PEER, key())
+            rx.unwrap(node(ME, epoch=5).wrap(INNER))
+            first = node(ME, epoch=5 + step)
+            got = rx.unwrap(first.wrap(INNER))
+            self.assertFalse(got.duplicate)
+            self.assertEqual(got.epoch, 5 + step)
+            # The window reset: seq 0 of the new epoch is not "behind" anything,
+            # and the second frame advances normally.
+            self.assertFalse(rx.unwrap(first.wrap(INNER)).duplicate)
+
+    def test_a_retired_epoch_replay_is_rejected(self):
+        old = node(ME, epoch=5)
+        old_packet = old.wrap(INNER)
+        self.rx.unwrap(old_packet)
+        self.rx.unwrap(node(ME, epoch=6).wrap(INNER))
+        self.assertIsNone(self.rx.unwrap(old.wrap(INNER)))
+        self.assertIsNone(self.rx.unwrap(old_packet))
+        self.assertEqual(self.rx.stats()["replayed"], 2)
+
+    def test_an_unknown_older_epoch_is_rejected(self):
+        self.rx.unwrap(node(ME, epoch=50).wrap(INNER))
+        self.assertIsNone(self.rx.unwrap(node(ME, epoch=40).wrap(INNER)))
+        self.assertEqual(self.rx.stats()["replayed_unknown_epoch"], 1)
+        self.assertIn("replayed=1", self.rx.summary_line())
+
+    def test_serial_comparison_across_the_byte_boundary(self):
+        self.rx.unwrap(node(ME, epoch=254).wrap(INNER))
+        # Counter 256+ can't transmit, but a PEER'S wire epoch 255 -> 1 (d=2)
+        # is "newer" in serial arithmetic and must not be mistaken for old.
+        rx = mesh.Mesh(PEER, key())
+        rx.unwrap(node(ME, epoch=255).wrap(INNER))
+        self.assertFalse(rx.unwrap(node(ME, epoch=1).wrap(INNER)).duplicate)
+
+    def test_unauthenticated_frames_never_touch_the_window(self):
+        packet = bytearray(self._frames(1)[0])
+        packet[5] = 0xFF  # forged high seq, tag no longer verifies
+        packet[6] = 0xFF
+        self.assertIsNone(self.rx.unwrap(bytes(packet)))
+        self.assertEqual(len(self.rx.replay), 0)
+
+    def test_forget_makes_the_frame_fresh_again(self):
+        # The bench's simulated deafness path.
+        p = self._frames(1)[0]
+        got = self.rx.unwrap(p)
+        self.rx.seen.forget((got.origin, got.epoch, got.seq))
+        self.assertFalse(self.rx.unwrap(p).duplicate)
+
+    def test_forget_of_a_frame_below_the_window_or_retired_is_a_noop(self):
+        packets = self._frames(mesh.REPLAY_WINDOW + 5)
+        for p in packets:
+            self.rx.unwrap(p)
+        first = packets[0]
+        self.rx.seen.forget((first[1:4], first[4], int.from_bytes(first[5:7], "big")))
+        self.assertIsNone(self.rx.unwrap(first))
+        self.rx.replay.forget((b"\x00\x00\x00", 1, 1))  # unknown origin
+
+    def test_origin_lru_eviction_re_learns(self):
+        rx = mesh.Mesh(PEER, key(), replay=mesh.ReplayWindow(max_origins=3))
+        senders = [node("%06x" % (0x100 + i), epoch=1) for i in range(5)]
+        first = senders[0].wrap(INNER)
+        rx.unwrap(first)
+        for s in senders[1:]:
+            rx.unwrap(s.wrap(INNER))
+        self.assertEqual(len(rx.replay), 3)
+        # Evicted: re-learned as unknown (accepted), no crash.
+        self.assertIsNotNone(rx.unwrap(first))
+        self.assertEqual(len(rx.replay), 3)
+
+    def test_our_own_echo_is_still_delivered_once(self):
+        # Passive acknowledgement: the relay hands our frame back.
+        packet = self.sender.wrap(INNER, hops=1)
+        got = self.sender.unwrap(packet)
+        self.assertIsNotNone(got)
+        self.assertEqual(got.origin, self.sender.origin)
+        self.assertFalse(got.duplicate)
+
+    def test_clear_frames_are_exempt(self):
+        self.rx.accept_clear = True
+        clear = self.sender.to_clear(self._frames(1)[0])
+        # A forged-high clear frame must not strand real clear traffic.
+        forged = bytearray(clear)
+        forged[5], forged[6] = 0xFF, 0xF0
+        self.assertFalse(self.rx.unwrap(bytes(forged)).duplicate)
+        self.assertFalse(self.rx.unwrap(clear).duplicate)
+        self.assertEqual(len(self.rx.replay), 0)
+
+    def test_the_window_is_pure_python_int_math(self):
+        w = mesh.ReplayWindow(window=4)
+        o = b"abc"
+        self.assertEqual(w.check(o, 0, 10), mesh.REPLAY_ACCEPT)
+        self.assertEqual(w.check(o, 0, 12), mesh.REPLAY_ACCEPT)
+        self.assertEqual(w.check(o, 0, 9), mesh.REPLAY_ACCEPT)   # 3 behind, in
+        self.assertEqual(w.check(o, 0, 8), mesh.REPLAY_REJECT)   # 4 behind, out
+        self.assertEqual(w.check(o, 0, 9), mesh.REPLAY_DUPLICATE)
+        self.assertEqual(w.check(o, 0, 11), mesh.REPLAY_ACCEPT)
+        self.assertEqual(w.check(o, 0, 12), mesh.REPLAY_DUPLICATE)
 
 
 if __name__ == "__main__":
