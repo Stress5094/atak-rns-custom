@@ -290,6 +290,11 @@ class MainActivity : AppCompatActivity() {
     // Which tab is showing, so the refresh only asks for the mesh picture
     // while somebody can see it.
     private var currentTab = 0
+    // The Network tab holds two pages (2 = Mesh, 3 = Coverage) behind its own
+    // sub-tab bar; this is the one it last showed.
+    private var networkSub = 2
+    private lateinit var networkTabs: com.google.android.material.tabs.TabLayout
+    private var syncingNetworkTabs = false
     // The last picture fetched, kept so a tap or a view toggle can redraw the
     // list without waiting up to 2 s for the next poll.
     private var lastMeshView: JSONObject? = null
@@ -442,10 +447,26 @@ class MainActivity : AppCompatActivity() {
         coveragePage = buildCoveragePage().apply { visibility = View.GONE }
         sharePage = shareUi.buildPage().apply { visibility = View.GONE }
 
+        // Mesh and Coverage share the Network tab, each as a sub-tab.
+        networkTabs = com.google.android.material.tabs.TabLayout(this).apply {
+            addTab(newTab().setText("Mesh"))
+            addTab(newTab().setText("Coverage"))
+            visibility = View.GONE
+            addOnTabSelectedListener(object :
+                com.google.android.material.tabs.TabLayout.OnTabSelectedListener {
+                override fun onTabSelected(tab: com.google.android.material.tabs.TabLayout.Tab) {
+                    if (!syncingNetworkTabs) showTab(2 + tab.position)
+                }
+                override fun onTabUnselected(tab: com.google.android.material.tabs.TabLayout.Tab) {}
+                override fun onTabReselected(tab: com.google.android.material.tabs.TabLayout.Tab) {}
+            })
+        }
+
         val pages = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             addView(statusPage)
             addView(radioTestPage)
+            addView(networkTabs)
             addView(meshPage)
             addView(coveragePage)
             addView(sharePage)
@@ -480,16 +501,18 @@ class MainActivity : AppCompatActivity() {
             // the icons.
             labelVisibilityMode =
                 com.google.android.material.navigation.NavigationBarView.LABEL_VISIBILITY_LABELED
-            listOf("Status" to R.drawable.ic_nav_status,
-                   "Debug" to R.drawable.ic_nav_debug,
-                   "Mesh" to R.drawable.ic_nav_mesh,
-                   "Coverage" to R.drawable.ic_nav_coverage,
-                   "Share" to R.drawable.ic_nav_share).forEachIndexed { i, (label, icon) ->
-                menu.add(android.view.Menu.NONE, i, i, label).setIcon(icon)
+            // Item ids are page indices; Network (id 2) opens whichever of
+            // Mesh (2) or Coverage (3) it showed last.
+            listOf(Triple(0, "Status", R.drawable.ic_nav_status),
+                   Triple(1, "Debug", R.drawable.ic_nav_debug),
+                   Triple(2, "Network", R.drawable.ic_nav_mesh),
+                   Triple(4, "Share", R.drawable.ic_nav_share)).forEachIndexed { order, (id, label, icon) ->
+                menu.add(android.view.Menu.NONE, id, order, label).setIcon(icon)
             }
             menu.findItem(4).isVisible = RadioLink.shareTabEnabled(this@MainActivity)
             setOnItemSelectedListener { item ->
-                if (item.itemId != currentTab) showTab(item.itemId)
+                val target = if (item.itemId == 2) networkSub else item.itemId
+                if (target != currentTab) showTab(target)
                 true
             }
         }
@@ -504,8 +527,19 @@ class MainActivity : AppCompatActivity() {
         meshPage.visibility = if (index == 2) View.VISIBLE else View.GONE
         coveragePage.visibility = if (index == 3) View.VISIBLE else View.GONE
         sharePage.visibility = if (index == 4) View.VISIBLE else View.GONE
+        val network = index == 2 || index == 3
+        networkTabs.visibility = if (network) View.VISIBLE else View.GONE
+        if (network) {
+            networkSub = index
+            if (networkTabs.selectedTabPosition != index - 2) {
+                syncingNetworkTabs = true
+                networkTabs.getTabAt(index - 2)?.select()
+                syncingNetworkTabs = false
+            }
+        }
         // Opened from code (showShareTab): the bar follows.
-        if (::nav.isInitialized && nav.selectedItemId != index) nav.selectedItemId = index
+        val navId = if (network) 2 else index
+        if (::nav.isInitialized && nav.selectedItemId != navId) nav.selectedItemId = navId
         shareUi.pageVisible(index == 4)
         // Straight away rather than on the next 2 s tick, so the tab does not
         // open blank. A no-op before onCreate finishes -- the first resume
@@ -1707,6 +1741,18 @@ class MainActivity : AppCompatActivity() {
                 nav.menu.findItem(4).isVisible = on
                 if (!on && currentTab == 4) showTab(0)
             }
+        })
+        advancedBox.addView(TextView(this).apply {
+            text = "The Share tab sends radio settings to the team over WiFi, or " +
+                "from a settings server: LoRa preset, frequency and power, FM " +
+                "settings, the coverage model, and optionally the passphrase. " +
+                "One phone hosts; each phone approves a change with its own PIN " +
+                "(or trusts the host), and everyone switches at the same moment. " +
+                "Nothing is sent over the radio. Share QR and Scan QR on the " +
+                "Status tab work without it."
+            textSize = 12f
+            setTextColor(COLOR_IDLE)
+            setPadding(0, 0, 0, dp(8))
         })
         advancedBox.addView(TextView(this).apply {
             text = "Link"

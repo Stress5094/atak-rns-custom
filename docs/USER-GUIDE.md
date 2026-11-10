@@ -138,9 +138,10 @@ ATAK's own mesh networking already uses 8087.
 
 ## 5. The screens
 
-The app has four tabs: **Status, Debug, Mesh, Coverage**. A fifth, **Share**,
-appears when you turn on *Debug → Show advanced features → Show the Share
-tab*.
+The app has three tabs: **Status, Debug, Network**. Network has two sub-tabs
+at the top, **Mesh** and **Coverage**, and reopens on the one you used last. A
+fourth tab, **Share**, appears when you turn on *Debug → Show advanced
+features → Show the Share tab*.
 
 ### Status
 
@@ -222,7 +223,7 @@ Bench and field-test tools.
   - **Test tone (10 s):** plays a tone through the FM cable to check the audio
     path. It sends no mesh traffic.
 
-### Mesh
+### Network → Mesh
 
 A diagram of who is heard on which radio (`mesh_view.py`): one line per peer
 per radio, marked direct or "via mesh", and graded good, weak or gone.
@@ -230,7 +231,7 @@ per radio, marked direct or "via mesh", and graded good, weak or gone.
 between other phones. The grading thresholds are first guesses, not measured
 values.
 
-### Coverage
+### Network → Coverage
 
 A predicted coverage map for your radio from where you stand (`coverage.py`).
 It uses building footprints and heights (Overture Maps, falling back to
