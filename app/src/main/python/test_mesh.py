@@ -344,7 +344,7 @@ class TestLoadEpoch(unittest.TestCase):
         c = mesh.load_epoch(self.path, self.FP)
         self.assertEqual((c.counter, c.exhausted), (0, None))
         self.assertTrue(c.counter_reset)
-        self.assertEqual(self._stored(), {"fp": self.FP, "counter": 0})
+        self.assertEqual(self._stored(), {"counters": {self.FP: 0}})
 
     def test_each_start_under_the_same_key_advances_the_counter(self):
         got = [mesh.load_epoch(self.path, self.FP) for _ in range(4)]
@@ -356,14 +356,83 @@ class TestLoadEpoch(unittest.TestCase):
             f.write("41")
         c = mesh.load_epoch(self.path, self.FP)
         self.assertEqual((c.counter, c.exhausted, c.counter_reset), (42, None, False))
-        self.assertEqual(self._stored(), {"fp": self.FP, "counter": 42})
+        self.assertEqual(self._stored(), {"counters": {self.FP: 42}})
+
+    def test_a_round_one_file_migrates_to_the_map(self):
+        with open(self.path, "w") as f:
+            f.write('{"fp": "%s", "counter": 9}' % self.FP)
+        c = mesh.load_epoch(self.path, self.FP)
+        self.assertEqual((c.counter, c.exhausted, c.counter_reset), (10, None, False))
+        self.assertEqual(self._stored(), {"counters": {self.FP: 10}})
+
+    def test_a_round_one_file_for_another_key_is_kept_and_the_new_key_starts_at_zero(self):
+        with open(self.path, "w") as f:
+            f.write('{"fp": "old1", "counter": 9}')
+        c = mesh.load_epoch(self.path, self.FP)
+        self.assertEqual((c.counter, c.counter_reset), (0, False))
+        self.assertEqual(self._stored(), {"counters": {"old1": 9, self.FP: 0}})
+
+    def test_returning_to_an_earlier_key_continues_past_where_it_stopped(self):
+        # The attack regression: A -> B -> A must not restart A at 0.
+        for _ in range(6):
+            last_a = mesh.load_epoch(self.path, "aaaa")
+        self.assertEqual(last_a.counter, 5)
+        self.assertEqual(mesh.load_epoch(self.path, "bbbb").counter, 0)
+        back = mesh.load_epoch(self.path, "aaaa")
+        self.assertGreater(back.counter, last_a.counter)
+        self.assertEqual(back.counter, 6)
+
+    def test_a_new_key_in_a_healthy_file_starts_at_zero_without_a_reset_flag(self):
+        mesh.load_epoch(self.path, "aaaa")
+        c = mesh.load_epoch(self.path, "bbbb")
+        self.assertEqual((c.counter, c.exhausted, c.counter_reset), (0, None, False))
+
+    def test_only_the_32_most_recently_used_keys_are_kept(self):
+        for i in range(32):
+            mesh.load_epoch(self.path, "k%02d" % i)
+        mesh.load_epoch(self.path, "k00")          # k00 is now the newest
+        mesh.load_epoch(self.path, "new1")         # evicts k01, not k00
+        mesh.load_epoch(self.path, "new2")         # evicts k02
+        kept = list(self._stored()["counters"])
+        self.assertEqual(len(kept), 32)
+        self.assertNotIn("k01", kept)
+        self.assertNotIn("k02", kept)
+        self.assertEqual(kept[-3:], ["k00", "new1", "new2"])
+        self.assertEqual(mesh.load_epoch(self.path, "k00").counter, 2)
+
+    def test_saving_keeps_the_other_keys_and_marks_this_one_newest(self):
+        mesh.load_epoch(self.path, "aaaa")
+        mesh.load_epoch(self.path, "bbbb")
+        self.assertTrue(mesh.save_epoch(7, "aaaa", self.path))
+        self.assertEqual(self._stored(), {"counters": {"bbbb": 0, "aaaa": 7}})
+        self.assertEqual(list(self._stored()["counters"]), ["bbbb", "aaaa"])
+
+    def test_exhaustion_is_per_key(self):
+        with open(self.path, "w") as f:
+            f.write('{"counters": {"aaaa": 255, "bbbb": 3}}')
+        self.assertEqual(mesh.load_epoch(self.path, "aaaa").exhausted,
+                         mesh.EXHAUSTED_SPACE)
+        c = mesh.load_epoch(self.path, "bbbb")
+        self.assertEqual((c.counter, c.exhausted), (4, None))
+        # Returning to the exhausted key still refuses; nothing was reset.
+        again = mesh.load_epoch(self.path, "aaaa")
+        self.assertEqual(again.exhausted, mesh.EXHAUSTED_SPACE)
+        self.assertEqual(self._stored()["counters"]["aaaa"], 255)
+
+    def test_a_malformed_map_counts_as_a_lost_file(self):
+        for junk in ('{"counters": []}', '{"counters": {"a": -1}}',
+                     '{"counters": {"a": "3"}}', '{"counters": {"a": true}}'):
+            with open(self.path, "w") as f:
+                f.write(junk)
+            c = mesh.load_epoch(self.path, self.FP)
+            self.assertEqual((c.counter, c.counter_reset), (0, True), junk)
 
     def test_a_different_key_resets_the_counter(self):
         mesh.load_epoch(self.path, self.FP)
         mesh.load_epoch(self.path, self.FP)
         c = mesh.load_epoch(self.path, "ffff")
         self.assertEqual((c.counter, c.exhausted, c.counter_reset), (0, None, False))
-        self.assertEqual(self._stored()["fp"], "ffff")
+        self.assertEqual(list(self._stored()["counters"]), [self.FP, "ffff"])
 
     def test_the_same_key_continues_where_it_left_off(self):
         mesh.load_epoch(self.path, "ffff")
@@ -380,12 +449,12 @@ class TestLoadEpoch(unittest.TestCase):
 
     def test_the_counter_is_never_masked(self):
         with open(self.path, "w") as f:
-            f.write('{"fp": "%s", "counter": 254}' % self.FP)
+            f.write('{"counters": {"%s": 254}}' % self.FP)
         self.assertEqual(mesh.load_epoch(self.path, self.FP).counter, 255)
         c = mesh.load_epoch(self.path, self.FP)
         self.assertEqual((c.counter, c.exhausted), (256, mesh.EXHAUSTED_SPACE))
-        # Exhaustion writes nothing: the file still says 255.
-        self.assertEqual(self._stored()["counter"], 255)
+        # Exhaustion does not advance the stored counter: it still says 255.
+        self.assertEqual(self._stored()["counters"][self.FP], 255)
 
     def test_a_legacy_255_is_exhausted_under_the_current_key(self):
         with open(self.path, "w") as f:
@@ -395,7 +464,7 @@ class TestLoadEpoch(unittest.TestCase):
 
     def test_rekeying_at_exhaustion_clears_it(self):
         with open(self.path, "w") as f:
-            f.write('{"fp": "%s", "counter": 255}' % self.FP)
+            f.write('{"counters": {"%s": 255}}' % self.FP)
         self.assertEqual(mesh.load_epoch(self.path, self.FP).exhausted,
                          mesh.EXHAUSTED_SPACE)
         c = mesh.load_epoch(self.path, "9999")
