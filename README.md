@@ -11,6 +11,8 @@ runs next to it and looks to ATAK like an ordinary TAK server on the phone.
 ATAK <-> this app <-> radio <-> [air] <-> radio <-> this app <-> ATAK
 ```
 
+<img src="docs/images/status.png" width="260" alt="The app's Status tab">
+
 Everything else is in the **[User guide](docs/USER-GUIDE.md)**: every screen
 and button, and the routing and repeating rules for RNodes and Meshtastic
 boards.

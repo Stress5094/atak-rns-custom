@@ -63,6 +63,8 @@ rebuild.
 
 ## 3. Connecting the radio
 
+<img src="images/radio-link.png" width="300" alt="The Radio link dialog: Radio (RNode, Meshtastic board, FM only), Connection (USB cable, Bluetooth), FM backup, and which radio">
+
 Everything here lives in **Radio link**: tap any of the link buttons on the
 Status tab. While the bridge isn't running, a **Radio link** button appears
 there instead.
@@ -164,6 +166,8 @@ features → Show the Share tab*.
 
 The tab you use day to day.
 
+<img src="images/status.png" width="300" alt="The Status tab: health pills, link buttons, tiles, the Network key line and the buttons">
+
 - **Identity:** this node's id. The radio's name appears when connected over
   Bluetooth.
 - **Network key line:** for example `Network key 3f9a · Short Slow · 915.000
@@ -213,6 +217,8 @@ The tab you use day to day.
 
 Bench and field-test tools.
 
+<img src="images/advanced.png" width="300" alt="The Advanced tab with advanced features shown: the three switches and the link buttons">
+
 - **Advanced features:** **Show advanced features** reveals:
   - **Show the Share tab:** off by default. *Share settings* and *Scan QR* on the
     Status tab work either way. With the tab hidden, settings offers that
@@ -251,6 +257,8 @@ Bench and field-test tools.
 
 ### Network → Mesh
 
+<img src="images/mesh.png" width="300" alt="The Mesh sub-tab: the legend and this phone in the middle, with no peers heard yet">
+
 A diagram of who is heard on which radio (`mesh_view.py`): one line per peer
 per radio, marked direct or "via mesh", and graded good, weak or gone.
 **Show probable links between other nodes** adds the links the app can infer
@@ -260,6 +268,7 @@ values.
 ### Network → Coverage
 
 A predicted coverage map for your radio from where you stand (`coverage.py`).
+(No screenshot here: a real map would show where the author lives.)
 It uses building footprints and heights (Overture Maps, falling back to
 OpenStreetMap), terrain, and your radio's power and antenna height. It is a
 prediction and hasn't been checked against measured range.
@@ -301,6 +310,8 @@ Settings sharing between phones. See [section 11](#11-sharing-settings-with-a-te
 ### Network settings
 
 Everything every phone on the network must match, in one dialog.
+
+<img src="images/network-settings.png" width="300" alt="The Network settings dialog: masked passphrase, New passphrase, LoRa preset, frequency and transmit power">
 
 - **Passphrase:** the network key. Hidden as dots; tap the eye to show it, to
   read it out or copy it to another phone.
@@ -516,6 +527,27 @@ The app repeats (relays) frames itself, in the same way whether the LoRa radio
 is an RNode or a Meshtastic board. The radio only puts frames on the air.
 Repeating is decided in `relay.py`.
 
+**At a glance:** every frame a node hears over LoRa goes through these
+checks. Only a frame that gets "yes" all the way down is repeated.
+
+```mermaid
+flowchart TD
+    IN["A frame is heard over LoRa"] --> Q1{"Is it a beacon?"}
+    Q1 -- yes --> NO["Not repeated"]
+    Q1 -- no --> Q2{"Any hops left?"}
+    Q2 -- no --> NO
+    Q2 -- yes --> Q3{"Heard it before?"}
+    Q3 -- yes --> NO
+    Q3 -- no --> Q4{"Do I hear someone<br/>the sender can't?"}
+    Q4 -- no --> NO
+    Q4 -- yes --> Q5{"Repeat budget left?<br/>1.5 s of airtime a minute"}
+    Q5 -- no --> NO
+    Q5 -- yes --> W["Wait up to 2 s:<br/>the weakest listener goes first"]
+    W --> Q6{"Did someone else<br/>repeat it meanwhile?"}
+    Q6 -- yes --> NO
+    Q6 -- no --> YES["Repeated, with one hop used up"]
+```
+
 ### The app's repeating rules (LoRa)
 
 Every node *can* repeat, but by default a frame is **not** repeated. A frame
@@ -552,6 +584,22 @@ is repeated only if it passes every test below, in order:
    - If another node's repeat of the same frame is heard first, the pending
      one is cancelled.
 
+**Example.** Three phones in a line: Alpha and Charlie are out of each
+other's range, and Bravo is in the middle.
+
+```mermaid
+flowchart LR
+    A(("Alpha<br/>sends a chat")) --- B(("Bravo<br/>repeats it")) --- C(("Charlie<br/>gets the repeat"))
+```
+
+- Alpha's beacons list who Alpha hears: only Bravo.
+- Bravo hears Charlie, and Charlie isn't on Alpha's list, so Bravo repeats
+  Alpha's chat. The chat had 3 hops; Bravo's copy has 2 left.
+- Charlie's only neighbour is Bravo, the phone it heard the repeat from, so
+  repeating again would reach nobody new. Charlie doesn't.
+- If all three stood together, everyone would hear everyone and nobody would
+  repeat anything.
+
 **Other links**
 
 - **FM never repeats.** At FM's airtime cost, repeating would starve the
@@ -568,6 +616,16 @@ it, and the rules above are the whole story.
 
 A Meshtastic board has its own flood-repeating, which would fight the app's.
 So the app turns it off from both ends:
+
+```mermaid
+flowchart LR
+    P1["App on phone 1"] -->|"frame, hop limit 0"| B1["Board 1<br/>Never repeat"]
+    B1 -.->|"over the air"| B2["Board 2<br/>Never repeat"]
+    B2 --> P2["App on phone 2<br/>decides whether to repeat"]
+```
+
+The boards only send and receive. Repeating is the app's job, by the rules
+above, exactly as with an RNode.
 
 - **The app's own packets go out with hop limit 0,** broadcast on Meshtastic's
   private-app port (256), with Meshtastic's own acknowledgements turned off.
