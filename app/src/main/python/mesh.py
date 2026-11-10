@@ -380,9 +380,11 @@ class SeenCache(object):
     reception, so expiry walks from the head of an insertion-ordered dict and
     stops at the first live entry.
 
-    This is also what bounds replay: a recorded frame played back inside the TTL
-    is recognised and dropped. Outside the TTL it is not, which is why the
-    caller additionally checks the decoded event's timestamp against the clock.
+    This bounds SHORT-horizon replay: a recorded frame played back inside the
+    TTL is recognised and dropped. Outside the TTL it is not -- the per-origin
+    ReplayWindow below is what covers that for authenticated frames; clear
+    frames rely on this cache (and the caller's check of the decoded event's
+    timestamp against the clock) alone.
     """
 
     def __init__(self, ttl_s=DEFAULT_SEEN_TTL_S, max_seen=DEFAULT_MAX_SEEN,
@@ -392,6 +394,10 @@ class SeenCache(object):
         self._clock = clock
         self._seen = collections.OrderedDict()
         self._lock = threading.Lock()
+        # Called with the frame id after forget() drops it. A Mesh sets this so
+        # that forgetting a frame also clears its ReplayWindow bit: simulated
+        # deafness has to leave no trace in EITHER structure.
+        self.on_forget = None
 
     def check(self, frame_id):
         """True the first time a frame id is offered, False afterwards.
@@ -447,9 +453,133 @@ class SeenCache(object):
                 self._seen.pop(frame_id, None)
         except Exception:
             pass
+        hook = self.on_forget
+        if hook is not None:
+            try:
+                hook(frame_id)
+            except Exception:
+                pass
 
     def __len__(self):
         return len(self._seen)
+
+
+# Replay window: how far behind an origin's newest sequence number a frame may
+# arrive and still be accepted (once). 128 sequence numbers at LoRa's fastest
+# (~0.13 s/frame) is at least ~17 s of flat-out sending by ONE origin, and real
+# senders are far slower (a beacon a minute, positions every few seconds), so
+# relayed copies -- which arrive seconds late (relay.py: 2 s windows, 60 s
+# message TTL) -- sit comfortably inside it. The arithmetic is documented, not
+# asserted.
+REPLAY_WINDOW = 128
+MAX_REPLAY_ORIGINS = 256
+MAX_RETIRED_EPOCHS = 4
+
+# ReplayWindow.check() verdicts.
+REPLAY_ACCEPT = "accept"
+REPLAY_DUPLICATE = "duplicate"          # heard again: deliver as a duplicate
+REPLAY_REJECT = "replayed"              # behind the window, or a retired epoch
+REPLAY_REJECT_UNKNOWN = "replayed_unknown_epoch"
+
+
+class ReplayWindow(object):
+    """Per-origin anti-replay window over AUTHENTICATED frames only.
+
+    SeenCache forgets after 300 s, so anything recorded and replayed later than
+    that used to be accepted as fresh: fake liveness, old positions re-posted,
+    re-relayed. This remembers, per origin, the highest sequence number heard
+    in the current epoch and a bitmap of which of the REPLAY_WINDOW numbers
+    ending there have been heard (the IPsec/DTLS scheme).
+
+    Only ever called after the AEAD tag verified: unauthenticated data must not
+    touch this state. Clear frames are exempt on purpose -- a keyless attacker
+    can mint any fresh seq there, so a window would add nothing, and a forged
+    high seq would let him silence real clear traffic.
+
+    Epochs move forward only under one key (mesh fix C guarantees no legitimate
+    wrap-around, and a data-wiped phone comes back with a new node id), so an
+    "older" epoch from a known origin has no honest cause and is rejected. The
+    one honest cause, a lost counter file under a surviving node id, is closed
+    on the sending side by regenerating the node id.
+
+    Origins are kept in an LRU of MAX_REPLAY_ORIGINS; an evicted origin is
+    simply re-learned.
+    """
+
+    def __init__(self, window=REPLAY_WINDOW, max_origins=MAX_REPLAY_ORIGINS,
+                 max_retired=MAX_RETIRED_EPOCHS):
+        self.window = window
+        self.max_origins = max_origins
+        self.max_retired = max_retired
+        self._mask = (1 << window) - 1
+        self._origins = collections.OrderedDict()
+        self._lock = threading.Lock()
+
+    def __len__(self):
+        return len(self._origins)
+
+    @staticmethod
+    def _fresh_state(epoch, seq):
+        return {"epoch": epoch, "high": seq, "bitmap": 1,
+                "old": collections.OrderedDict()}
+
+    def check(self, origin, epoch, seq):
+        """Record (origin, epoch, seq) and return a REPLAY_* verdict."""
+        with self._lock:
+            st = self._origins.get(origin)
+            if st is None:
+                self._origins[origin] = self._fresh_state(epoch, seq)
+                while len(self._origins) > self.max_origins:
+                    self._origins.popitem(last=False)
+                return REPLAY_ACCEPT
+            self._origins.move_to_end(origin)
+
+            if epoch == st["epoch"]:
+                high = st["high"]
+                if seq > high:
+                    shift = seq - high
+                    if shift >= self.window:
+                        st["bitmap"] = 1
+                    else:
+                        st["bitmap"] = ((st["bitmap"] << shift) | 1) & self._mask
+                    st["high"] = seq
+                    return REPLAY_ACCEPT
+                back = high - seq
+                if back >= self.window:
+                    return REPLAY_REJECT
+                bit = 1 << back
+                if st["bitmap"] & bit:
+                    return REPLAY_DUPLICATE
+                st["bitmap"] |= bit
+                return REPLAY_ACCEPT
+
+            d = (epoch - st["epoch"]) & 0xFF
+            if 1 <= d <= 127:
+                # A genuine restart: retire the epoch we were tracking.
+                old = st["old"]
+                old.pop(st["epoch"], None)
+                old[st["epoch"]] = st["high"]
+                while len(old) > self.max_retired:
+                    old.popitem(last=False)
+                old.pop(epoch, None)
+                st["epoch"], st["high"], st["bitmap"] = epoch, seq, 1
+                return REPLAY_ACCEPT
+            if epoch in st["old"]:
+                return REPLAY_REJECT
+            return REPLAY_REJECT_UNKNOWN
+
+    def forget(self, frame_id):
+        """Clear the bit for (origin, epoch, seq), so the next copy reads as new.
+        A no-op for a retired epoch, a seq below the window, or an unknown
+        origin: the bench only exercises recent frames."""
+        origin, epoch, seq = frame_id
+        with self._lock:
+            st = self._origins.get(origin)
+            if st is None or st["epoch"] != epoch:
+                return
+            back = st["high"] - seq
+            if 0 <= back < self.window:
+                st["bitmap"] &= ~(1 << back)
 
 
 class Mesh(object):
@@ -464,7 +594,7 @@ class Mesh(object):
 
     def __init__(self, node_id, key, epoch=0, on_epoch_change=None,
                  seen=None, clock=time.monotonic, exhausted=None,
-                 counter_reset=False, seen_clear=None):
+                 counter_reset=False, seen_clear=None, replay=None):
         if not HAVE_AEAD:
             raise MeshError(
                 "no AEAD backend: the cryptography package is required "
@@ -488,6 +618,9 @@ class Mesh(object):
         # write here, or a keyless attacker could pre-claim a victim's upcoming
         # (origin, epoch, seq) or flush the cache to reopen replay.
         self.seen = seen if seen is not None else SeenCache(clock=clock)
+        # Per-origin replay window, sealed frames only (see ReplayWindow).
+        self.replay = replay if replay is not None else ReplayWindow()
+        self.seen.on_forget = self.replay.forget
         # Unauthenticated (T_CLEAR) frames only; same defaults. See
         # _unwrap_clear for the one read-only look it takes at `seen`.
         self.seen_clear = (seen_clear if seen_clear is not None
@@ -694,6 +827,19 @@ class Mesh(object):
             # decrypted, so it proves the key is right, which is the only thing
             # this counter is measuring.
             self._since_accept = 0
+            # Replay window first, and only now that the tag verified. A frame
+            # behind the window or from a retired epoch is dropped outright; one
+            # heard before is passed up as a duplicate (not None) because the
+            # relay layer's passive cancellation and the ack-on-duplicate logic
+            # depend on seeing it. Our own echoed frames are tracked like any
+            # other origin and are within the window by construction.
+            verdict = self.replay.check(bytes(origin), epoch, seq)
+            if verdict == REPLAY_REJECT or verdict == REPLAY_REJECT_UNKNOWN:
+                self._stats[verdict] += 1
+                return None
+            if verdict == REPLAY_DUPLICATE:
+                self._stats["duplicate"] += 1
+                return Inbound(origin, epoch, seq, hops, frame, True)
             fresh = self.seen.check((origin, epoch, seq))
             self._stats["unwrapped" if fresh else "duplicate"] += 1
             return Inbound(origin, epoch, seq, hops, frame, not fresh)
@@ -750,6 +896,9 @@ class Mesh(object):
         out = dict(self._stats)
         out["seen"] = len(self.seen)
         out["seen_clear"] = len(self.seen_clear)
+        out["replay_origins"] = len(self.replay)
+        out["replayed"] = (self._stats.get("replayed", 0)
+                           + self._stats.get("replayed_unknown_epoch", 0))
         out["epoch"] = self._epoch
         out["counter"] = self._counter
         out["seq"] = self._seq
@@ -771,6 +920,9 @@ class Mesh(object):
                 % (s.get("wrapped", 0), s.get("unwrapped", 0),
                    s.get("duplicate", 0), s.get("unauthenticated", 0),
                    s.get("foreign", 0), self._epoch))
+        replayed = s.get("replayed", 0) + s.get("replayed_unknown_epoch", 0)
+        if replayed:
+            line += " replayed=%d" % replayed
         if s.get("sent_clear") or s.get("unwrapped_clear") or s.get("clear_ignored"):
             line += (" clear_sent=%d clear_heard=%d clear_ignored=%d"
                      % (s.get("sent_clear", 0), s.get("unwrapped_clear", 0),
