@@ -70,18 +70,23 @@ Everything here lives under **Status → Radio link**.
 - **USB cable:** plug the radio in, then accept Android's prompt. Tick
   "always open with this app", because some boards restart after a settings
   change and would otherwise wait behind a new prompt.
-- **Bluetooth:** with the cable still plugged in, tap **Turn on** under *On
-  the radio itself*. The radio ships with Bluetooth off, and the command that
-  switches it on has to go over the cable. You only do this once per radio.
-  Then:
-  1. Tap **Scan for radios** and pick the radio.
-  2. Android asks for a six-digit code. The app shows it on the phone. The
-     radio also shows it on its own screen while in pairing mode.
-  3. Tap **Save** and restart the bridge when asked. Then unplug.
+- **Bluetooth (RNode):** with the radio connected by cable and working, tap
+  **Switch to Bluetooth** at the top of Radio link. In one go, the app:
+  1. turns on the radio's Bluetooth and puts it into pairing mode,
+  2. finds the radio (the strongest RNode signal, which is the one on the
+     cable) and shows its name,
+  3. pairs it, typing the six-digit code into Android's prompt for you,
+  4. asks to restart the bridge. Tap **Restart**, then unplug the cable.
 
-  Bluetooth radios don't appear in Android's own Bluetooth settings, which is
-  why the scan is inside the app. Over Bluetooth the radio needs its own
-  battery.
+  It takes about 15 seconds. If the phone won't let the app type the code,
+  the code is shown to type in by hand. The radio stays in pairing mode for
+  about a minute.
+
+  The manual controls are still there for other cases (no cable, or two
+  radios side by side): **Bluetooth**, **Scan for radios**, tap the radio,
+  and **Turn on** / **Pairing mode** under *On the radio itself*. Bluetooth
+  radios don't appear in Android's own Bluetooth settings, which is why the
+  scan is inside the app. Over Bluetooth the radio needs its own battery.
 - **The board runs Meshtastic firmware (not RNode):** tick this for a
   Meshtastic board. The *LoRa settings* button on the Status tab then opens the
   [Meshtastic board](#meshtastic-board) dialog instead of the RNode one.
