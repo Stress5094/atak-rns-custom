@@ -6903,6 +6903,31 @@ def _erase_all_settings():
     return json.dumps({"erased": True})
 
 
+def _wipe_status():
+    """Time left until each auto-erase timer fires, for the status screen.
+    None means that timer is off. Uses the freshest last-heard (in memory, or
+    what wipe_tick last persisted)."""
+    try:
+        p = _wipe_policy()
+        now = time.time()
+        deadman_in = None
+        silence_in = None
+        deadman_s = int(p.get("deadman_s") or 0)
+        if deadman_s:
+            armed = int(p.get("deadman_armed_at") or 0)
+            if armed:
+                deadman_in = max(0, int(armed + deadman_s - now))
+        silence_s = int(p.get("silence_s") or 0)
+        if silence_s:
+            heard = int(_wipe_last_heard) if _wipe_last_heard else 0
+            last = max(int(p.get("last_heard_at") or 0), heard)
+            if last:
+                silence_in = max(0, int(last + silence_s - now))
+        return {"deadman_in_s": deadman_in, "silence_in_s": silence_in}
+    except Exception:
+        return {"deadman_in_s": None, "silence_in_s": None}
+
+
 def set_fm_profile(name, vox=False, custom_spec=""):
     """Which FSK tone placement the FM link uses (RadioLink.fmToneProfile()).
     Kotlin entry point, called at startup, before start(). Returns the profile
@@ -7842,6 +7867,9 @@ def get_status():
             # nonce counter is used up or cannot be saved. Receiving still works.
             "tx_stopped": (_mesh.tx_stopped() or "") if _mesh is not None else "",
             "node_id_changed": _node_id_regenerated,
+            # How long until an auto-erase fires, for the status screen.
+            # Absent/null when both timers are off.
+            "wipe": _wipe_status(),
             # How much of this key's 256-value transmit counter is spent; the
             # status screen warns from mesh.COUNTER_WARN_AT.
             "tx_counter_used": _mesh.stats()["nonce_counter"] if _mesh is not None else 0,

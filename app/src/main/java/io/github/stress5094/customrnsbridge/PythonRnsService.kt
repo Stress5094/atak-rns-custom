@@ -294,6 +294,7 @@ object PythonRnsService {
         Log.w(TAG, "auto-erase triggered: wiping settings and stopping")
         RadioLink.wipe(context)
         CoverageSettings.clear(context)
+        LogRecorder.erase(context)
         try {
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             if (Build.VERSION.SDK_INT >= 26) {

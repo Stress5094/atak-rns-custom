@@ -2668,6 +2668,20 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /** "5d 3h", "2h 41m", "3m 12s", "9s" -- time remaining, not a duration. */
+    private fun countdown(seconds: Int): String {
+        val d = seconds / 86400
+        val h = (seconds % 86400) / 3600
+        val m = (seconds % 3600) / 60
+        val s = seconds % 60
+        return when {
+            d > 0 -> "${d}d ${h}h"
+            h > 0 -> "${h}h ${m}m"
+            m > 0 -> "${m}m ${s}s"
+            else -> "${s}s"
+        }
+    }
+
     private fun pickDuration(onPick: (Int) -> Unit) {
         MaterialAlertDialogBuilder(this)
             .setTitle("Erase after")
@@ -3024,6 +3038,25 @@ class MainActivity : AppCompatActivity() {
             localBox.addView(line(
                 "This phone has a new node id (its counter file was lost). " +
                     "Other phones will see it as a new node.",
+                COLOR_WARN))
+        }
+
+        // The auto-erase countdown, always shown: a wipe is the one event that
+        // must never surprise the operator, so it sits outside the `details`
+        // gate and outside the FM block. Off timers report nothing.
+        val wipe = status.optJSONObject("wipe")
+        val wipeDeadman = wipe?.optInt("deadman_in_s", -1) ?: -1
+        val wipeSilence = wipe?.optInt("silence_in_s", -1) ?: -1
+        if (wipeDeadman >= 0) {
+            localBox.addView(line(
+                "Erases all settings in " + countdown(wipeDeadman) + ". " +
+                    "Advanced tab → Auto-erase to change or cancel.",
+                COLOR_WARN))
+        }
+        if (wipeSilence >= 0) {
+            localBox.addView(line(
+                "Erases all settings in " + countdown(wipeSilence) +
+                    " if no peer is heard before then.",
                 COLOR_WARN))
         }
 
