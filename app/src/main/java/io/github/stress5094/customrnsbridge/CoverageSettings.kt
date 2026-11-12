@@ -83,4 +83,9 @@ object CoverageSettings {
     fun setSatellite(c: Context, on: Boolean) = prefs(c).edit().putBoolean(KEY_SATELLITE, on).apply()
     fun showPeers(c: Context): Boolean = prefs(c).getBoolean(KEY_SHOW_PEERS, true)
     fun setShowPeers(c: Context, on: Boolean) = prefs(c).edit().putBoolean(KEY_SHOW_PEERS, on).apply()
+
+    /** Wipe the model and view-choice preferences (auto-erase). */
+    fun clear(c: Context) {
+        prefs(c).edit().clear().commit()
+    }
 }

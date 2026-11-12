@@ -1,5 +1,8 @@
 package io.github.stress5094.customrnsbridge
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -213,6 +216,7 @@ object PythonRnsService {
                         try {
                             Thread.sleep(SETTINGS_TICK_MS)
                             SettingsShareUi.tick(context.applicationContext)
+                            wipeCheck(context.applicationContext)
                         } catch (e: InterruptedException) {
                             return@Thread
                         } catch (e: Exception) {
@@ -275,6 +279,38 @@ object PythonRnsService {
     } catch (e: Exception) {
         Log.e(TAG, "$module.$method failed", e)
         null
+    }
+
+    /**
+     * The service's auto-erase clock (rns_bridge.wipe_tick): when a wipe has
+     * come due, clear Kotlin's own preferences and stop the process with
+     * nothing left on it. The Python side has already removed every key and
+     * secret file by the time this runs.
+     */
+    private fun wipeCheck(context: Context) {
+        val out = call("wipe_tick") ?: return
+        val obj = try { org.json.JSONObject(out) } catch (e: Exception) { return }
+        if (!obj.optBoolean("erased")) return
+        Log.w(TAG, "auto-erase triggered: wiping settings and stopping")
+        RadioLink.wipe(context)
+        CoverageSettings.clear(context)
+        try {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if (Build.VERSION.SDK_INT >= 26) {
+                nm.createNotificationChannel(NotificationChannel(
+                    "rtak_security", "Security", NotificationManager.IMPORTANCE_HIGH))
+            }
+            nm.notify(1, Notification.Builder(context, "rtak_security")
+                .setSmallIcon(android.R.drawable.stat_notify_error)
+                .setContentTitle("Settings erased")
+                .setContentText("This phone erased all of its settings and keys.")
+                .setAutoCancel(true)
+                .build())
+        } catch (e: Exception) {
+            Log.w(TAG, "could not notify about the erase", e)
+        }
+        RadioLink.stopBridgeServices(context)
+        android.os.Process.killProcess(android.os.Process.myPid())
     }
 
     /**

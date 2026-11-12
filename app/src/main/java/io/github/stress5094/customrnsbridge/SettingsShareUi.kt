@@ -67,6 +67,19 @@ class SettingsShareUi(
         /** Host keys as people compare them: "ab12 cd34 ef56 7890". */
         fun fingerprint(hostId: String) = hostId.chunked(4).joinToString(" ")
 
+        /** True when an offer (a JSON offer view) turns "send FM unencrypted"
+         *  ON -- worth saying so in the notification, not just on the screen. */
+        private fun offerTurnsOffEncryption(offer: JSONObject?): Boolean {
+            if (offer == null) return false
+            val changes = offer.optJSONArray("changes") ?: return false
+            for (i in 0 until changes.length()) {
+                val c = changes.getJSONObject(i)
+                if (c.optString("key") == "fm_clear" &&
+                    c.optString("new").lowercase() in listOf("true", "yes", "1")) return true
+            }
+            return false
+        }
+
         private fun notify(c: Context, title: String, body: String) {
             val nm = c.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             if (android.os.Build.VERSION.SDK_INT >= 26) {
@@ -163,12 +176,20 @@ class SettingsShareUi(
                     shown?.runOnUiThread { shown.showSharedSettingsOffers() }
                 }
                 "applied" -> {
+                    val warn = if (offerTurnsOffEncryption(offer))
+                        "\n⚠ FM is now sent UNENCRYPTED: anyone listening can read every message."
+                        else ""
                     notify(c, "Settings from $from applied",
-                        "$from is a trusted host. Open Share settings to undo.")
+                        "$from is a trusted host. Open Share settings to undo.$warn")
                     shown?.runOnUiThread { shown.onSharedSettingsApplied() }
                 }
-                "scheduled" -> notify(c, "Settings from $from accepted",
-                    "This phone switches at ${offer?.let { switchTime(it) } ?: "the time the host set"}.")
+                "scheduled" -> {
+                    val warn = if (offerTurnsOffEncryption(offer))
+                        "\n⚠ This turns OFF encryption on FM."
+                        else ""
+                    notify(c, "Settings from $from accepted",
+                        "This phone switches at ${offer?.let { switchTime(it) } ?: "the time the host set"}.$warn")
+                }
                 "switched" -> {
                     notify(c, "Switched to the shared settings", detail)
                     shown?.runOnUiThread { shown.onSharedSettingsApplied() }
@@ -417,7 +438,14 @@ class SettingsShareUi(
             visibility = View.GONE
         }
         pass.setOnCheckedChangeListener { _, on -> passWarn.visibility = if (on) View.VISIBLE else View.GONE }
-        listOf(lora, cov, fm, pass, passWarn).forEach { col.addView(it) }
+        val fmClearWarn = text("⚠ The FM group turns OFF encryption on every phone that accepts " +
+            "it — anyone listening can read their messages.", 12f, Ui.error(activity)).apply {
+            visibility = View.GONE
+        }
+        fm.setOnCheckedChangeListener { _, on ->
+            fmClearWarn.visibility = if (on && RadioLink.fmClear(activity)) View.VISIBLE else View.GONE
+        }
+        listOf(lora, cov, fm, pass, passWarn, fmClearWarn).forEach { col.addView(it) }
         col.addView(fmNote())
         MaterialAlertDialogBuilder(activity)
             .setTitle("Share settings")
@@ -558,7 +586,14 @@ class SettingsShareUi(
             "chose to accept the passphrase over the network. A wrong passphrase cuts a phone off " +
             "from everyone.", 12f, Ui.error(activity)).apply { visibility = View.GONE }
         pass.setOnCheckedChangeListener { _, on -> passWarn.visibility = if (on) View.VISIBLE else View.GONE }
-        listOf(lora, cov, fm, pass, passWarn).forEach { col.addView(it) }
+        val fmClearWarn = text("⚠ The FM group turns OFF encryption on every phone that accepts " +
+            "it — anyone listening can read their messages.", 12f, Ui.error(activity)).apply {
+            visibility = View.GONE
+        }
+        fm.setOnCheckedChangeListener { _, on ->
+            fmClearWarn.visibility = if (on && RadioLink.fmClear(activity)) View.VISIBLE else View.GONE
+        }
+        listOf(lora, cov, fm, pass, passWarn, fmClearWarn).forEach { col.addView(it) }
         col.addView(fmNote())
         col.addView(text("Switch in how many minutes? Every phone that accepted by then switches " +
             "together; later ones switch as they accept. 0 = each switches when it accepts.", 13f))
@@ -819,6 +854,18 @@ class SettingsShareUi(
         }
     }
 
+    /** True when this offer turns "send FM unencrypted" ON -- the one shared
+     *  change worth an extra-loud warning, because it removes encryption. */
+    private fun turnsOffEncryption(offer: JSONObject): Boolean {
+        val changes = offer.optJSONArray("changes") ?: return false
+        for (i in 0 until changes.length()) {
+            val c = changes.getJSONObject(i)
+            if (c.optString("key") == "fm_clear" &&
+                c.optString("new").lowercase() in listOf("true", "yes", "1")) return true
+        }
+        return false
+    }
+
     private fun showApproval(offer: JSONObject) {
         py("status", SettingsShareUi.kotlinJson(activity)) { st ->
             val hasPin = st.optBoolean("has_pin")
@@ -835,6 +882,11 @@ class SettingsShareUi(
                 col.addView(text("⚠ Changes this phone's network: it stops hearing phones that do " +
                     "not change too. It keeps the new settings until you press Undo on the Share tab.",
                     12f, Ui.error(activity)))
+            }
+            if (turnsOffEncryption(offer)) {
+                col.addView(text("⚠ This turns OFF encryption on FM: anyone listening with a " +
+                    "receiver can read every message. Only accept if you mean to operate " +
+                    "unencrypted (for example, where the rules require it).", 13f, Ui.error(activity)))
             }
             val notes = offer.optJSONArray("notes") ?: JSONArray()
             for (i in 0 until notes.length()) col.addView(text("Note: ${notes.optString(i)}", 12f, Ui.onSurfaceVariant(activity)))
@@ -888,7 +940,10 @@ class SettingsShareUi(
         }
         val b = MaterialAlertDialogBuilder(activity)
             .setTitle("Shared settings")
-            .setMessage(head + "\n\n" + changeLines(offer))
+            .setMessage(head + "\n\n" + changeLines(offer) +
+                if (turnsOffEncryption(offer))
+                    "\n\n⚠ FM is now sent UNENCRYPTED: anyone listening can read every message."
+                else "")
             .setPositiveButton("OK", null)
         if (outcome == "applied") b.setNeutralButton("Undo") { _, _ -> confirmUndo() }
         b.show()
