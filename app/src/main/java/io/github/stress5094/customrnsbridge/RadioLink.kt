@@ -520,4 +520,11 @@ object RadioLink {
         context.stopService(Intent(context, BleSerialBridgeService::class.java))
         context.stopService(Intent(context, FmAudioBridgeService::class.java))
     }
+
+    /** Wipe every stored choice -- the transport, radio firmware, FM, WiFi and
+     *  link-override settings -- so the app comes back as fresh as a first
+     *  install. Used by the auto-erase feature. */
+    fun wipe(context: Context) {
+        prefs(context).edit().clear().commit()
+    }
 }

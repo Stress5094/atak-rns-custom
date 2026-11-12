@@ -3528,6 +3528,11 @@ def _note_peer_frame(sender, rssi, snr, seq, direct=True, hops_away=None,
     # range the extra samples are exactly where the answer is. Relayed frames
     # are excluded because their signal describes the relay, not the sender --
     # the same distinction peers.py draws for the same reason.
+    # The wall-clock of the most recent peer sighting, for the silence
+    # auto-erase timer (see wipe_tick). Every authenticated frame updates it.
+    global _wipe_last_heard
+    _wipe_last_heard = time.time()
+
     if direct:
         _record_range_sample(sender, rssi, snr, seq, link)
 
@@ -6743,6 +6748,159 @@ def set_fm_clear(enabled):
     if active is not None:
         active.accept_clear = _fm_clear
     return _fm_clear
+
+
+# ---------------------------------------------------------------------------
+# Auto-erase (security): wipe every setting and key on a timer.
+#
+# Two independent triggers, both checked here rather than in Kotlin because
+# the secrets and the peer table live here, and because the service's settings
+# tick (PythonRnsService) is the only clock that keeps running while ATAK is
+# in front. The policy is a small JSON file in app-private storage:
+#
+#   deadman_s   erase this long after arming, whether or not anyone is heard
+#   silence_s   erase this long after the last peer was heard
+#
+# _erase_all_settings() removes the passphrase, the node id, the radio config,
+# the epoch counter and every settings-sharing file (PIN, trusted hosts, host
+# key) and resets the in-memory state, so nothing of the group survives.
+# ---------------------------------------------------------------------------
+
+_WIPE_PATH = os.path.expanduser("~/.atakrns_wipe")
+_wipe_last_heard = 0.0
+
+_WIPE_FILES = (
+    _MESH_PASSPHRASE_PATH,
+    _NODE_ID_PATH,
+    _RADIO_CONFIG_PATH,
+    os.path.expanduser("~/.atakrns_mesh_epoch"),
+    os.path.expanduser("~/.atakrns_settings_share.json"),
+    os.path.expanduser("~/.atakrns_host_key.json"),
+    os.path.expanduser("~/.atakrns_host_rev.json"),
+    os.path.expanduser("~/.atakrns_settings_net.json"),
+    _WIPE_PATH,
+)
+
+
+def _wipe_policy():
+    try:
+        with open(_WIPE_PATH) as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_wipe_policy(policy):
+    try:
+        tmp = _WIPE_PATH + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(policy, f)
+            f.flush()
+        os.replace(tmp, _WIPE_PATH)
+        return True
+    except OSError:
+        return False
+
+
+def get_wipe_policy():
+    """The auto-erase policy, for the Advanced tab. Never raises."""
+    try:
+        p = _wipe_policy()
+        return json.dumps({
+            "deadman_s": int(p.get("deadman_s") or 0),
+            "deadman_armed_at": int(p.get("deadman_armed_at") or 0),
+            "silence_s": int(p.get("silence_s") or 0),
+            "silence_armed_at": int(p.get("silence_armed_at") or 0),
+            "last_heard_at": int(p.get("last_heard_at") or 0),
+        })
+    except Exception:
+        return json.dumps({"deadman_s": 0, "deadman_armed_at": 0, "silence_s": 0,
+                           "silence_armed_at": 0, "last_heard_at": 0})
+
+
+def set_wipe_policy(deadman_s, silence_s):
+    """Arm or disarm the auto-erase timers. Both arguments are durations in
+    seconds; 0 disables that timer. Arming restarts that timer's clock. Never
+    raises."""
+    try:
+        deadman_s = max(0, int(deadman_s or 0))
+        silence_s = max(0, int(silence_s or 0))
+        p = _wipe_policy()
+        now = int(time.time())
+        p["deadman_s"] = deadman_s
+        p["silence_s"] = silence_s
+        p["deadman_armed_at"] = now if deadman_s else 0
+        p["silence_armed_at"] = now if silence_s else 0
+        p["last_heard_at"] = now if silence_s else 0
+        _save_wipe_policy(p)
+        RNS.log("[cot-bridge] auto-erase: %ds deadman, %ds silence"
+                % (deadman_s, silence_s), RNS.LOG_NOTICE)
+    except Exception:
+        pass
+    return get_wipe_policy()
+
+
+def wipe_tick():
+    """Check the auto-erase timers; wipe everything if one has come due.
+
+    Called from the service's settings tick (every ~10 s). Returns
+    {"erased": true} when a wipe just happened, so Kotlin can clear its own
+    preferences and stop. Never raises."""
+    try:
+        p = _wipe_policy()
+        now = time.time()
+        heard = _wipe_last_heard
+        if heard and int(p.get("last_heard_at") or 0) < heard:
+            p["last_heard_at"] = int(heard)
+        deadman_s = int(p.get("deadman_s") or 0)
+        silence_s = int(p.get("silence_s") or 0)
+        due = False
+        if deadman_s:
+            armed = int(p.get("deadman_armed_at") or 0)
+            if armed and now >= armed + deadman_s:
+                due = True
+        if silence_s and not due:
+            last = int(p.get("last_heard_at") or 0)
+            if last and now - last >= silence_s:
+                due = True
+        if not due:
+            _save_wipe_policy(p)
+            return json.dumps({"erased": False})
+        _erase_all_settings()
+        return json.dumps({"erased": True})
+    except Exception:
+        return json.dumps({"erased": False})
+
+
+def erase_all_settings():
+    """Kotlin entry point (Advanced tab) and wipe_tick()'s action: remove every
+    setting and key, and reset the in-memory state. Never raises."""
+    return _erase_all_settings()
+
+
+def _erase_all_settings():
+    global _mesh, _mesh_passphrase, _NODE_ID, _radio_config, _fingerprint_cache
+    for path in _WIPE_FILES:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    _mesh_passphrase = ""
+    _mesh = None
+    _fingerprint_cache = None
+    _radio_config = None
+    try:
+        _peers.clear()
+    except Exception:
+        pass
+    # A fresh node id for the next start: this one may have been recorded.
+    try:
+        _NODE_ID = os.urandom(3).hex()
+    except Exception:
+        _NODE_ID = ""
+    RNS.log("[cot-bridge] all settings erased (auto-erase)", RNS.LOG_WARNING)
+    return json.dumps({"erased": True})
 
 
 def set_fm_profile(name, vox=False, custom_spec=""):

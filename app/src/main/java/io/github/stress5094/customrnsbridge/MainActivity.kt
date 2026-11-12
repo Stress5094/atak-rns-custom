@@ -1769,6 +1769,69 @@ class MainActivity : AppCompatActivity() {
             setTextColor(COLOR_IDLE)
             setPadding(0, 0, 0, dp(8))
         })
+        // Auto-erase (security): wipe every setting and key on a timer, for a
+        // phone that may be lost or captured.
+        advancedBox.addView(sectionLabel("Auto-erase"))
+        advancedBox.addView(sectionCaption("Erases every setting and key on this phone after the " +
+            "chosen time, or after that long with no peer heard. For a phone that may be lost."))
+        var wipeLoading = true
+        var deadmanS = 0
+        var silenceS = 0
+        fun wipeLabel(s: Int) = eraseDurationLabel(s)
+        fun saveWipe() = executor.execute {
+            callPython("set_wipe_policy", deadmanS.toString(), silenceS.toString())
+        }
+        val deadmanSwitch = com.google.android.material.materialswitch.MaterialSwitch(this).apply {
+            text = "Erase all settings after a set time"
+        }
+        val deadmanDuration = Ui.outlined(this, "after: off").apply { textSize = 12f }
+        val silenceSwitch = com.google.android.material.materialswitch.MaterialSwitch(this).apply {
+            text = "Erase all settings if no peer is heard after a set time"
+        }
+        val silenceDuration = Ui.outlined(this, "after: off").apply { textSize = 12f }
+        deadmanSwitch.setOnCheckedChangeListener { _, on ->
+            if (wipeLoading) return@setOnCheckedChangeListener
+            deadmanS = if (on) 24 * 3600 else 0
+            deadmanDuration.text = "after: " + wipeLabel(deadmanS)
+            saveWipe()
+        }
+        silenceSwitch.setOnCheckedChangeListener { _, on ->
+            if (wipeLoading) return@setOnCheckedChangeListener
+            silenceS = if (on) 3600 else 0
+            silenceDuration.text = "after: " + wipeLabel(silenceS)
+            saveWipe()
+        }
+        deadmanDuration.setOnClickListener {
+            pickDuration { s ->
+                deadmanS = s
+                deadmanDuration.text = "after: " + wipeLabel(s)
+                saveWipe()
+            }
+        }
+        silenceDuration.setOnClickListener {
+            pickDuration { s ->
+                silenceS = s
+                silenceDuration.text = "after: " + wipeLabel(s)
+                saveWipe()
+            }
+        }
+        advancedBox.addView(deadmanSwitch)
+        advancedBox.addView(deadmanDuration)
+        advancedBox.addView(silenceSwitch)
+        advancedBox.addView(silenceDuration)
+        executor.execute {
+            val policy = callPython("get_wipe_policy")?.let { JSONObject(it) }
+            handler.post {
+                deadmanS = policy?.optInt("deadman_s", 0) ?: 0
+                silenceS = policy?.optInt("silence_s", 0) ?: 0
+                deadmanSwitch.isChecked = deadmanS > 0
+                silenceSwitch.isChecked = silenceS > 0
+                deadmanDuration.text = "after: " + wipeLabel(deadmanS)
+                silenceDuration.text = "after: " + wipeLabel(silenceS)
+                wipeLoading = false
+            }
+        }
+
         advancedBox.addView(TextView(this).apply {
             text = "Link"
             textSize = 13f
@@ -2269,8 +2332,8 @@ class MainActivity : AppCompatActivity() {
                     return@setOnClickListener
                 }
                 // A typed passphrase that is guessable by someone recording the
-                // radio gets one confirmation. Warning only: [Use it anyway]
-                // proceeds. If the bridge cannot say, it proceeds silently.
+                // radio is refused outright, not merely warned about. If the
+                // bridge cannot say, it proceeds as before.
                 executor.execute {
                     val weak = try {
                         JSONObject(callPython("passphrase_strength", entered) ?: "{}")
@@ -2282,12 +2345,14 @@ class MainActivity : AppCompatActivity() {
                         if (!weak) {
                             proceed()
                         } else {
+                            passBox.error = "Too weak — will not be applied"
                             MaterialAlertDialogBuilder(this)
-                                .setTitle("Weak passphrase")
+                                .setTitle("Passphrase too weak")
                                 .setMessage("This passphrase is guessable by someone " +
-                                    "recording the radio. Use 'New passphrase' instead?")
-                                .setPositiveButton("Use it anyway") { _, _ -> proceed() }
-                                .setNegativeButton("Go back", null)
+                                    "recording the radio, so it will not be applied. " +
+                                    "Tap 'New passphrase' for a strong one, or type a " +
+                                    "longer, random phrase.")
+                                .setPositiveButton("Go back", null)
                                 .show()
                         }
                     }
@@ -2585,6 +2650,33 @@ class MainActivity : AppCompatActivity() {
 
     private fun callPython(method: String, vararg args: String): String? =
         PythonRnsService.call(method, *args)
+
+    /** Durations offered for the Advanced tab's auto-erase timers. */
+    private val eraseDurations = listOf(
+        3600 to "1 hour", 6 * 3600 to "6 hours", 12 * 3600 to "12 hours",
+        24 * 3600 to "1 day", 2 * 24 * 3600 to "2 days",
+        7 * 24 * 3600 to "7 days", 30 * 24 * 3600 to "30 days")
+
+    private fun eraseDurationLabel(seconds: Int): String {
+        if (seconds <= 0) return "off"
+        val day = 24 * 3600
+        val hour = 3600
+        return when {
+            seconds % day == 0 -> "${seconds / day} day${if (seconds / day == 1) "" else "s"}"
+            seconds % hour == 0 -> "${seconds / hour} hour${if (seconds / hour == 1) "" else "s"}"
+            else -> "$seconds seconds"
+        }
+    }
+
+    private fun pickDuration(onPick: (Int) -> Unit) {
+        MaterialAlertDialogBuilder(this)
+            .setTitle("Erase after")
+            .setItems(eraseDurations.map { it.second }.toTypedArray()) { _, i ->
+                onPick(eraseDurations[i].first)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
 
     /**
      * A plain 800 Hz tone (the modem's own first_tone, so it's testing the
