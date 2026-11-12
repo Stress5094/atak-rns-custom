@@ -144,6 +144,23 @@ object LogRecorder {
         Log.i(TAG, "log recording stopped")
     }
 
+    /**
+     * Stop recording and delete every log and range-test file. Used by the
+     * auto-erase feature, so a phone that wipes its settings also leaves no
+     * on-device record of what happened.
+     */
+    @Synchronized
+    fun erase(context: Context) {
+        stop()
+        currentFile = null
+        try {
+            File(context.filesDir, "logs").listFiles()?.forEach { it.delete() }
+        } catch (e: Exception) {
+            Log.w(TAG, "could not erase the logs", e)
+        }
+        Log.i(TAG, "logs erased")
+    }
+
     /** The file this run is writing to, or null if recording never started. */
     fun currentLogFile(): File? = currentFile
 
