@@ -196,7 +196,7 @@ The tab you use day to day.
 
 - **Identity:** this node's id. The radio's name appears when connected over
   Bluetooth.
-- **Network key line:** for example `Network key 3f9a · Short Slow · 915.000
+- **Network key line:** for example `Network key 63f9 · Short Slow · 915.000
   MHz`. The four-character key is a fingerprint of the passphrase. Everything
   on this line must be the same on every phone. A wrong passphrase and a dead
   radio look the same from one phone, so compare this line first.
@@ -244,7 +244,7 @@ The tab you use day to day.
 
 Bench and field-test tools.
 
-<img src="images/advanced.png" width="300" alt="The Advanced tab with advanced features shown: the three switches and the link buttons">
+<img src="images/advanced.png" width="300" alt="The Advanced tab with advanced features shown: the three switches, and the start of the Auto-erase section. Link forcing, the log and the diagnostics are further down.">
 
 - **Advanced features:** **Show advanced features** reveals:
   - **Show the Share tab:** off by default. *Share settings* and *Scan QR* on the
