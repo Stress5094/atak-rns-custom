@@ -9,14 +9,24 @@
 name: tests
 
 on:
+  # Branches only. An unfiltered `push:` also matches TAGS, which made a tag
+  # run this workflow twice over: once directly, and once through the release
+  # workflow that calls it.
   push:
+    branches:
+      - '**'
   pull_request:
   # So the release workflow can run exactly this, rather than a second copy of
   # it that drifts. A tag that cannot pass the suite does not get published.
   workflow_call:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # The name is written out rather than taken from github.workflow, which in a
+  # CALLED workflow resolves to the caller. That put this workflow in the
+  # release workflow's own group, and cancel-in-progress then cancelled the
+  # caller that was waiting on it -- a release that failed in two seconds with
+  # no job to point at.
+  group: tests-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
