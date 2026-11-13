@@ -45,7 +45,7 @@ class FakeClock(object):
 
 
 PLI = (
-    b'<event version="2.0" uid="ANDROID-352214111111111" type="a-f-G-U-C" '
+    b'<event version="2.0" uid="ANDROID-990000111111111" type="a-f-G-U-C" '
     b'time="2026-07-30T18:22:31.123Z" start="2026-07-30T18:22:31.123Z" '
     b'stale="2026-07-30T18:24:46.123Z" how="m-g">'
     b'<point lat="35.1234567" lon="-79.7654321" hae="123.45" ce="9.5" le="9999999.0"/>'
@@ -83,7 +83,7 @@ MARKER = (
 )
 
 GEOCHAT = (
-    b'<event version="2.0" uid="GeoChat.ANDROID-352214111111111.All Chat Rooms.'
+    b'<event version="2.0" uid="GeoChat.ANDROID-990000111111111.All Chat Rooms.'
     b'7f3a2b19-1c4d-4e2a-9f88-2b7c1d0e5a63" type="b-t-f" '
     b'time="2026-07-30T18:30:02.415Z" start="2026-07-30T18:30:02.415Z" '
     b'stale="2026-07-30T18:31:02.415Z" how="h-g-i-g-o">'
@@ -91,11 +91,11 @@ GEOCHAT = (
     b'<detail><__chat parent="RootContactGroup" groupOwner="false" '
     b'messageId="7f3a2b19-1c4d-4e2a-9f88-2b7c1d0e5a63" chatroom="All Chat Rooms" '
     b'id="All Chat Rooms" senderCallsign="BRAVO01">'
-    b'<chatgrp uid0="ANDROID-352214111111111" uid1="All Chat Rooms" id="All Chat Rooms"/>'
-    b'</__chat><link uid="ANDROID-352214111111111" type="a-f-G-U-C" relation="p-p"/>'
-    b'<remarks source="BAO.F.ATAK.ANDROID-352214111111111" to="All Chat Rooms" '
+    b'<chatgrp uid0="ANDROID-990000111111111" uid1="All Chat Rooms" id="All Chat Rooms"/>'
+    b'</__chat><link uid="ANDROID-990000111111111" type="a-f-G-U-C" relation="p-p"/>'
+    b'<remarks source="BAO.F.ATAK.ANDROID-990000111111111" to="All Chat Rooms" '
     b'time="2026-07-30T18:30:02.415Z">moving to phase line bravo, eta 10 mikes</remarks>'
-    b'<__serverdestination destinations="192.168.77.5:4242:tcp:ANDROID-352214111111111"/>'
+    b'<__serverdestination destinations="192.168.77.5:4242:tcp:ANDROID-990000111111111"/>'
     b'</detail></event>'
 )
 
@@ -113,7 +113,7 @@ ZXML_CHAT = CHAT_FALLBACK.replace(b'<event version="2.0"',
                                   b'<event qos="1-r-c" version="2.0"')
 
 SERVER_PLI = (
-    b'<event version="2.0" uid="ANDROID-352214111111111" type="a-f-G-U-C" '
+    b'<event version="2.0" uid="ANDROID-990000111111111" type="a-f-G-U-C" '
     b'time="2026-07-30T18:22:31.123Z" stale="2026-07-30T18:24:46.123Z" how="m-g">'
     b'<point lat="35.1234567" lon="-79.7654321" hae="123.45" ce="9.5" le="9999999.0"/>'
     b'<detail><contact endpoint="*:-1:stcp" callsign="BRAVO01"/>'
@@ -240,7 +240,7 @@ class TestCompactPath(unittest.TestCase):
     def test_pli_round_trip(self):
         out = codec.decode(codec.encode(PLI), now=NOW)
         root = attrs(out)
-        self.assertEqual(root.get("uid"), "ANDROID-352214111111111")
+        self.assertEqual(root.get("uid"), "ANDROID-990000111111111")
         self.assertEqual(root.get("type"), "a-f-G-U-C")
         self.assertEqual(root.get("how"), "m-g")
         self.assertEqual(root.get("time"), "2026-07-30T18:22:31.000Z")
@@ -752,7 +752,7 @@ class TestFallbackPath(unittest.TestCase):
         frame[1], frame[2] = flags_val >> 8, flags_val & 0xFF
         out = attrs(codec.decode(bytes(frame)))
         self.assertIsNone(out.get("access"))
-        self.assertEqual(out.get("uid"), "ANDROID-352214111111111")
+        self.assertEqual(out.get("uid"), "ANDROID-990000111111111")
 
     def test_unknown_event_attribute_forces_fallback(self):
         # @qos is a real CoT attribute deliberately not implemented, so it
@@ -936,7 +936,7 @@ class TestRobustness(unittest.TestCase):
     def test_takcontrol_prefix_recovered(self):
         src = b'<TakControl><TakProtocolSupport version="1"/></TakControl>' + PLI
         frame = codec.encode(src)
-        self.assertEqual(attrs(codec.decode(frame)).get("uid"), "ANDROID-352214111111111")
+        self.assertEqual(attrs(codec.decode(frame)).get("uid"), "ANDROID-990000111111111")
 
     def test_junk_prefix_stripped_on_fallback_path_too(self):
         # The compact path repairs a junk prefix by construction (it rebuilds
@@ -958,7 +958,7 @@ class TestRobustness(unittest.TestCase):
     def test_xml_declaration_prefix(self):
         src = b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' + PLI
         self.assertEqual(attrs(codec.decode(codec.encode(src))).get("uid"),
-                         "ANDROID-352214111111111")
+                         "ANDROID-990000111111111")
 
     def test_decode_is_total(self):
         compact = codec.encode(PLI)
@@ -1875,7 +1875,7 @@ class TestReliableWireFormat(unittest.TestCase):
 # A self-SA at a given minute and position, built from the same shape as PLI so
 # the sizes here are directly comparable with test_pli_size_budget.
 def self_sa(minute=0, lat=35.1234567, lon=-79.7654321, callsign="BRAVO01",
-            uid="ANDROID-352214111111111", stale_s=135):
+            uid="ANDROID-990000111111111", stale_s=135):
     ts = 1785000000 + 60 * minute
     return (
         '<event version="2.0" uid="%s" type="a-f-G-U-C" time="%s" start="%s" '
@@ -1922,7 +1922,7 @@ class TestSessionCompression(unittest.TestCase):
         frame = self.send(0)
         self.assertTrue(ext_of(frame) & codec.X_BIND)
         self.assertFalse(ext_of(frame) & codec.X_BOUND)
-        self.assertIn(b"ANDROID-352214111111111", unsqueezed(frame))
+        self.assertIn(b"ANDROID-990000111111111", unsqueezed(frame))
 
     def test_following_frames_are_bound_deltas(self):
         self.send(0)
@@ -1930,7 +1930,7 @@ class TestSessionCompression(unittest.TestCase):
             frame = self.send(minute)
             self.assertTrue(ext_of(frame) & codec.X_BOUND, minute)
             self.assertTrue(ext_of(frame) & codec.X_DELTA, minute)
-            self.assertNotIn(b"ANDROID-352214111111111", unsqueezed(frame))
+            self.assertNotIn(b"ANDROID-990000111111111", unsqueezed(frame))
             self.assertNotIn(b"BRAVO01", unsqueezed(frame))
 
     def test_keyframe_returns_on_the_interval(self):
@@ -1955,7 +1955,7 @@ class TestSessionCompression(unittest.TestCase):
     def test_bound_delta_restores_everything(self):
         self.rx_decode(self.send(0))
         out = attrs(self.rx_decode(self.send(1, lat=35.2000000)))
-        self.assertEqual(out.get("uid"), "ANDROID-352214111111111")
+        self.assertEqual(out.get("uid"), "ANDROID-990000111111111")
         self.assertEqual(out.find("detail/contact").get("callsign"), "BRAVO01")
         self.assertAlmostEqual(float(out.find("point").get("lat")), 35.2, places=7)
         self.assertEqual(out.get("time"), codec._format_ts(1785000060))
@@ -1969,7 +1969,7 @@ class TestSessionCompression(unittest.TestCase):
         for minute in range(11):
             lat = 35.1234567 + 0.000757 * minute
             out = attrs(self.rx_decode(self.send(minute, lat=lat)))
-            self.assertEqual(out.get("uid"), "ANDROID-352214111111111", minute)
+            self.assertEqual(out.get("uid"), "ANDROID-990000111111111", minute)
             self.assertAlmostEqual(
                 float(out.find("point").get("lat")), lat, places=7)
 
@@ -2018,7 +2018,7 @@ class TestSessionCompression(unittest.TestCase):
             codec.decode(self.send(5), cold)
         # The 6th frame this session sends is a keyframe again.
         out = attrs(codec.decode(self.send(6), cold))
-        self.assertEqual(out.get("uid"), "ANDROID-352214111111111")
+        self.assertEqual(out.get("uid"), "ANDROID-990000111111111")
 
     # --- what ends a delta run ---
 
@@ -2088,7 +2088,7 @@ class TestSessionCompression(unittest.TestCase):
         self.rx_decode(self.send(0))
         codec.encode(MARKER, codec.RNS_MAX_PAYLOAD, self.tx)
         out = attrs(self.rx_decode(self.send(1)))
-        self.assertEqual(out.get("uid"), "ANDROID-352214111111111")
+        self.assertEqual(out.get("uid"), "ANDROID-990000111111111")
 
     def test_chat_never_leans_on_the_identity_binding(self):
         """Deliberate, and the reason a chat carries its sender's uid in full.
@@ -2136,7 +2136,7 @@ class TestSessionCompression(unittest.TestCase):
             self.assertIn(frame[0] & 0x0F,
                           (codec.T_COMPACT_X, codec.T_ZCOMPACT_X))
             out = attrs(codec.decode(frame, rx))
-            self.assertEqual(out.get("uid"), "ANDROID-352214111111111")
+            self.assertEqual(out.get("uid"), "ANDROID-990000111111111")
             self.assertEqual(out.find("detail/sensor").attrib,
                              {"fov": "45", "range": "100"})
         self.assertTrue(ext_of(frames[0]) & codec.X_BIND)
@@ -2152,7 +2152,7 @@ class TestSessionCompression(unittest.TestCase):
         codec.encode_compact(root, self.tx)
         self.assertIsNone(self.tx.uid)          # staged, not applied
         self.tx.commit()
-        self.assertEqual(self.tx.uid, "ANDROID-352214111111111")
+        self.assertEqual(self.tx.uid, "ANDROID-990000111111111")
 
     # --- the extended flags word ---
 
@@ -2308,13 +2308,13 @@ class TestGeoChatCompact(unittest.TestCase):
 
     def test_a_remarks_source_that_is_not_the_sender_goes_generic(self):
         assert_carried_exactly(self, 
-            GEOCHAT.replace(b'source="BAO.F.ATAK.ANDROID-352214111111111"',
+            GEOCHAT.replace(b'source="BAO.F.ATAK.ANDROID-990000111111111"',
                             b'source="BAO.F.ATAK.SOMEBODY-ELSE"'),
             "source is rebuilt from the sender")
 
     def test_a_chatgrp_that_disagrees_with_the_uid_goes_generic(self):
         assert_carried_exactly(self, 
-            GEOCHAT.replace(b'<chatgrp uid0="ANDROID-352214111111111"',
+            GEOCHAT.replace(b'<chatgrp uid0="ANDROID-990000111111111"',
                             b'<chatgrp uid0="ANDROID-999999999999999"'),
             "uid0 is rebuilt from the uid's sender field")
 
@@ -2330,7 +2330,7 @@ class TestGeoChatCompact(unittest.TestCase):
 
     def test_a_link_that_is_not_the_sender_goes_generic(self):
         assert_carried_exactly(self, 
-            GEOCHAT.replace(b'<link uid="ANDROID-352214111111111" type="a-f-G-U-C" '
+            GEOCHAT.replace(b'<link uid="ANDROID-990000111111111" type="a-f-G-U-C" '
                             b'relation="p-p"/>',
                             b'<link uid="OTHER" type="a-f-G-U-C" relation="p-p"/>'),
             "the link is rebuilt as the sender")
@@ -3225,11 +3225,11 @@ class TestPositionClassification(unittest.TestCase):
 # ATAK emits them (the 2026-10-14 comparison used Meshtastic's fixtures, which
 # are GPL-3.0 and so are not copied here).
 EMERGENCY = (
-    b'<event version="2.0" uid="ANDROID-352214111111111-9-1-1" type="b-a-o-tbl" '
+    b'<event version="2.0" uid="ANDROID-990000111111111-9-1-1" type="b-a-o-tbl" '
     b'time="2026-08-07T15:32:35.000Z" start="2026-08-07T15:32:35.000Z" '
     b'stale="2026-08-07T15:42:35.000Z" how="h-e">'
     b'<point lat="35.1234567" lon="-79.7654321" hae="123.45" ce="9.5" le="9999999.0"/>'
-    b'<detail><link uid="ANDROID-352214111111111" type="a-f-G-U-C" relation="p-p"/>'
+    b'<detail><link uid="ANDROID-990000111111111" type="a-f-G-U-C" relation="p-p"/>'
     b'<contact callsign="BRAVO01-Alert"/>'
     b'<emergency type="911 Alert">BRAVO01</emergency></detail></event>'
 )
@@ -3243,7 +3243,7 @@ RANGE_LINE = (
     b'<inclination value="0.0"/><rangeUnits value="1"/><bearingUnits value="0"/>'
     b'<northRef value="1"/><strokeColor value="-65536"/><strokeWeight value="3.0"/>'
     b'<contact callsign="R&amp;B 1"/><remarks/><labels_on value="true"/>'
-    b'<link uid="ANDROID-352214111111111" type="a-f-G-U-C" '
+    b'<link uid="ANDROID-990000111111111" type="a-f-G-U-C" '
     b'relation="p-p" production_time="2026-08-07T15:32:35.000Z"/></detail></event>'
 )
 
@@ -3252,7 +3252,7 @@ class TestGenericElements(unittest.TestCase):
     """Detail children no typed encoding models ride as generic elements --
     exactly, and in place of the zlib'd-XML fallback that used to carry them."""
 
-    CTX = {"uid": "ANDROID-352214111111111", "ts": 1786116755, "count": 0}
+    CTX = {"uid": "ANDROID-990000111111111", "ts": 1786116755, "count": 0}
 
     def round_trip(self, text):
         raw = codec._encode_gvalue(text, self.CTX)
@@ -3268,7 +3268,7 @@ class TestGenericElements(unittest.TestCase):
                 ("", codec.GV_EMPTY), ("true", codec.GV_TRUE),
                 ("false", codec.GV_FALSE), ("-65536", codec.GV_INT),
                 ("1523.6672", codec.GV_DEC), ("3.0", codec.GV_DEC),
-                ("ANDROID-352214111111111", codec.GV_EVENT_UID),
+                ("ANDROID-990000111111111", codec.GV_EVENT_UID),
                 ("ANDROID-0123456789abcdef", codec.GV_ANDROID),
                 ("1b2c3d4e-5f60-4718-8293-a4b5c6d7e8f9", codec.GV_UUID),
                 ("2026-08-07T15:32:35.000Z", codec.GV_TIME),

@@ -18,7 +18,7 @@ import java.util.concurrent.Executors
  * PUBLIC DOMAIN and keyless, which is why it was chosen over Esri's sharper
  * World Imagery, whose terms are not clear for an app like this. Measured
  * 2026-10-19 at the test area: the tile cache is populated to zoom 16 (~2 m per
- * pixel at 33 N) and 404s above it, so closer zooms stretch z16 -- soft at
+ * pixel at mid-latitudes) and 404s above it, so closer zooms stretch z16 -- soft at
  * the map's tightest zoom. US only; elsewhere every tile 404s and the map
  * shows streets alone.
  *
