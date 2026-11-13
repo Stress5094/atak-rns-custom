@@ -92,8 +92,12 @@ android {
         applicationId = "io.github.stress5094.customrnsbridge"
         minSdk = 26
         targetSdk = 33
-        versionCode = 1
-        versionName = "1.0"
+        // Overridden by the release workflow from the git tag, so a published
+        // build carries the version it was released as. Unset everywhere else,
+        // which keeps a local build reading 1.0 exactly as it always has --
+        // the BUILD_STAMP below is what tells two local builds apart.
+        versionCode = (System.getenv("RTAK_VERSION_CODE") ?: "1").toInt()
+        versionName = System.getenv("RTAK_VERSION_NAME") ?: "1.0"
 
         ndk {
             abiFilters.add("arm64-v8a")
@@ -112,9 +116,43 @@ android {
         buildConfig = true
     }
 
+    // Release signing, supplied by the environment and never by a file in the
+    // repository. The release workflow writes the keystore out of a GitHub
+    // secret, builds, and deletes it again; nothing here reads a path that a
+    // clone would have.
+    //
+    // All four variables have to be present or the config is not created at
+    // all: a half-configured signingConfig fails the build with a message
+    // about a null password, which reads like a Gradle bug rather than a
+    // missing secret. Absent, `assembleRelease` keeps its old behaviour and
+    // produces an UNSIGNED apk, which Android will refuse to install -- that
+    // is the honest outcome for a build with no key, not a problem to hide.
+    val keystorePath = System.getenv("RTAK_KEYSTORE_FILE")
+    val keystorePassword = System.getenv("RTAK_KEYSTORE_PASSWORD")
+    val keystoreAlias = System.getenv("RTAK_KEY_ALIAS")
+    val keystoreKeyPassword = System.getenv("RTAK_KEY_PASSWORD")
+    val signingReady = !keystorePath.isNullOrBlank() &&
+            !keystorePassword.isNullOrBlank() &&
+            !keystoreAlias.isNullOrBlank() &&
+            !keystoreKeyPassword.isNullOrBlank()
+
+    if (signingReady) {
+        signingConfigs {
+            create("release") {
+                storeFile = file(keystorePath!!)
+                storePassword = keystorePassword
+                keyAlias = keystoreAlias
+                keyPassword = keystoreKeyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (signingReady) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
