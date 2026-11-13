@@ -535,7 +535,7 @@ class SettingsNetTest(unittest.TestCase):
                 sn.parse_card(bad)
 
     def test_which_addresses_are_pinned_to_wifi(self):
-        for addr, local in (("192.168.55.113", True), ("10.1.2.3", True),
+        for addr, local in (("192.168.77.113", True), ("10.1.2.3", True),
                             ("172.16.0.9", True), ("169.254.1.1", True),
                             ("127.0.0.1", False), ("8.8.8.8", False)):
             self.assertEqual(sn.is_local(addr), local, addr)

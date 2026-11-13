@@ -490,7 +490,7 @@ class FoundHostsTest(_Fixture):
     class Client(object):
         def __init__(self):
             self.found_ = [{"host": "aaaa000011112222", "name": "Laptop server",
-                            "addr": "192.168.55.106", "port": 47812}]
+                            "addr": "192.168.77.106", "port": 47812}]
             self.approved, self.forgotten = [], []
 
         def found(self):
@@ -524,7 +524,7 @@ class FoundHostsTest(_Fixture):
         super(FoundHostsTest, self).tearDown()
 
     def test_a_host_heard_is_asked_about_and_connected_only_when_approved(self):
-        sl._found_host("aaaa000011112222", "Laptop server", "192.168.55.106")
+        sl._found_host("aaaa000011112222", "Laptop server", "192.168.77.106")
         ev = self._j(sl.tick(KOTLIN))["events"]
         self.assertEqual(ev[0][0], "host_found")
         self.assertEqual(json.loads(ev[0][1])["name"], "Laptop server")
@@ -541,7 +541,7 @@ class FoundHostsTest(_Fixture):
 
     def test_an_ignored_host_is_not_asked_about_again_and_forget_disconnects(self):
         self._j(sl.host_ignore("aaaa000011112222"))
-        sl._found_host("aaaa000011112222", "Laptop server", "192.168.55.106")
+        sl._found_host("aaaa000011112222", "Laptop server", "192.168.77.106")
         self.assertEqual(self._j(sl.tick(KOTLIN))["events"], [])
         self.assertEqual(self._j(sl.status(KOTLIN))["found"], [])
         self._j(sl.host_connect("aaaa000011112222"))        # changed their mind
@@ -552,7 +552,7 @@ class FoundHostsTest(_Fixture):
 
 
     def test_an_ignored_host_can_be_unignored_and_is_asked_about_again(self):
-        sl._found_host("aaaa000011112222", "Laptop server", "192.168.55.106")
+        sl._found_host("aaaa000011112222", "Laptop server", "192.168.77.106")
         sl.tick(KOTLIN)
         self._j(sl.host_ignore("aaaa000011112222"))
         st = self._j(sl.status(KOTLIN))

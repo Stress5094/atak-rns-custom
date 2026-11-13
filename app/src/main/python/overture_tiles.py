@@ -59,7 +59,7 @@ _UA = "rtak-fm-coverage/1.0 (field planning)"
 
 MAX_ZOOM = 14          # the only zoom with full building detail and heights
 BASEMAP_ZOOM = 13      # streets for orienting the map; ~4x fewer tiles
-MAX_AREA_TILES = 64    # hard cap on one download (~5 x 5 km at z14 at 33 N)
+MAX_AREA_TILES = 64    # hard cap on one download (~5 x 5 km at z14 at mid-latitudes)
 MAX_BASEMAP_TILES = 16
 
 # Streets drawn on the map, the same classes coverage.py asks Overpass for.

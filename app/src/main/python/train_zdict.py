@@ -87,7 +87,7 @@ def build(seed=SEED, size=DICT_BYTES):
     for base in (GEOCHAT, DIRECT_CHAT):
         for _ in range(150):
             raw = base
-            for old in (b"ANDROID-352214111111111", b"ANDROID-0123456789abcdef",
+            for old in (b"ANDROID-990000111111111", b"ANDROID-0123456789abcdef",
                         b"ANDROID-fedcba9876543210"):
                 raw = raw.replace(old, android_uid())
             raw = raw.replace(b"7f3a2b19-1c4d-4e2a-9f88-2b7c1d0e5a63", uuid4().encode())
