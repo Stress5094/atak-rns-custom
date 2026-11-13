@@ -33,8 +33,20 @@ keytool -genkeypair -v \
   -alias rtak \
   -keyalg RSA -keysize 4096 \
   -validity 10000 \
-  -storetype PKCS12
+  -storetype PKCS12 \
+  -dname "CN=rtak"
 ```
+
+`-dname` sets the certificate's name outright and skips the questions. It is
+worth passing: answering those prompts interactively and pressing return
+through them produces a certificate reading
+`CN=…, OU=Unknown, O=Unknown, L=Unknown, ST=Unknown, C=Unknown`, and that name
+is embedded in every APK you publish for anyone to read.
+
+**The name cannot be changed later.** Android identifies an app by its signing
+certificate, so re-issuing the certificate under a different name is as
+breaking as a new key: nobody who installed an earlier release could be
+upgraded. Pick it before the first release and keep it.
 
 `-validity 10000` is about 27 years. A key that expires is a key that cannot
 ship an upgrade, so this is deliberately long.
