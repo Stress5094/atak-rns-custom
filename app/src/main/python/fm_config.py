@@ -1374,8 +1374,8 @@ OPERATING_POINT = LinkConfig(
 # 10.32 s -- are all from the old burst lengths), and 1 in-burst copy. They are
 # coupled, so the bench run that checks them needs three cells and not two.
 # evidence_line() reports the placement's own evidence; these two are recorded
-# in docs/open-questions.md, not in the Profile, because they are
-# properties of this configuration rather than of the tone placement.
+# here rather than in the Profile, because they are properties of this
+# configuration rather than of the tone placement.
 #
 # The remaining untested lever is the FEC rate: this code is already 1/2, so the
 # 1/3 -> 1/2 saving Phase 0 listed is spent here too. There is no stronger code
