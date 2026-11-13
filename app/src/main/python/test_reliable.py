@@ -959,3 +959,119 @@ class TestLinkLatency(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAnAckDoesNotStrandAPeerThatIsStillReassembling(unittest.TestCase):
+    """Found on the bench, 2026-11-12, with three nodes on the air.
+
+    A two-fragment broadcast chat went out. One phone acknowledged it after a
+    single transmission, so the message was completed and its frame dropped.
+    The third node then reported holding 1 of 2 and named the piece it lacked
+    -- and nothing ever sent that piece again, because the only copy of the
+    frame had already been deleted. The sender logged DELIVERED. The receiver
+    waited forever.
+
+    A peer that sends a partial report is not silent and is not finished: it
+    answered, and what it said was "I am missing these". So an acknowledgement
+    from somebody else must not end the message while such a peer is waiting.
+
+    What this must NOT do is let a stalled peer hold a message open for ever:
+    the retry timer is still never reset by a partial report, and tick() still
+    ends the message at max_attempts.
+    """
+
+    def partial(self, msg_id, acker, count, have):
+        return codec.decode_partial(
+            codec.encode_partial(ME, msg_id, acker, count, have), acker)
+
+    def register_two_fragments(self, tx):
+        msg_id, _ = tx.register(a_frame(), ME, [PEER_A, PEER_B])
+        tx.note_fragment_count(msg_id, 2)
+        return msg_id
+
+    def test_the_bench_case_the_missing_fragment_is_still_sent(self):
+        tx, clock = make_tx()
+        msg_id = self.register_two_fragments(tx)
+        # PEER_B holds fragment 0 and says so; PEER_A acknowledges in full.
+        tx.on_partial(self.partial(msg_id, PEER_B, 2, {0}))
+        self.assertIsNone(
+            tx.on_ack(codec.Ack(ME, msg_id, PEER_A)),
+            "an ack completed the message while a peer was mid-reassembly, "
+            "which deletes the frame that peer is still waiting for")
+        clock.advance(600)
+        retries = tx.tick()[0]
+        self.assertEqual(len(retries), 1, "the missing fragment was not resent")
+        self.assertEqual(retries[0][5], {1},
+                         "the retry should carry only the fragment PEER_B "
+                         "said it lacked")
+
+    def test_the_report_arriving_after_the_ack_is_the_same_case(self):
+        """Ordering is a race on the air -- the ack won it on the bench."""
+        tx, clock = make_tx()
+        msg_id = self.register_two_fragments(tx)
+        tx.on_ack(codec.Ack(ME, msg_id, PEER_A))
+        tx.on_partial(self.partial(msg_id, PEER_B, 2, {0}))
+        clock.advance(600)
+        self.assertEqual(tx.tick()[0][0][5], {1})
+
+    def test_it_completes_once_the_straggler_acknowledges(self):
+        tx, _ = make_tx()
+        msg_id = self.register_two_fragments(tx)
+        tx.on_partial(self.partial(msg_id, PEER_B, 2, {0}))
+        tx.on_ack(codec.Ack(ME, msg_id, PEER_A))
+        done = tx.on_ack(codec.Ack(ME, msg_id, PEER_B))
+        self.assertIsNotNone(done, "the message never completed")
+        self.assertEqual(done.acked, {PEER_A, PEER_B})
+        self.assertEqual(tx.stats().get("delivered"), 1)
+
+    def test_a_peer_that_reports_holding_everything_is_not_waiting(self):
+        """A full bitmap is not a complaint, so it must not hold the message."""
+        tx, _ = make_tx()
+        msg_id = self.register_two_fragments(tx)
+        tx.on_partial(self.partial(msg_id, PEER_B, 2, {0, 1}))
+        self.assertIsNotNone(tx.on_ack(codec.Ack(ME, msg_id, PEER_A)))
+
+    def test_an_unfragmented_message_still_completes_on_the_first_ack(self):
+        """The fix must not slow down the ordinary one-packet chat."""
+        tx, _ = make_tx()
+        msg_id, _ = tx.register(a_frame(), ME, [PEER_A, PEER_B])
+        self.assertIsNotNone(tx.on_ack(codec.Ack(ME, msg_id, PEER_A)))
+
+    def test_a_stalled_peer_cannot_hold_a_message_open_for_ever(self):
+        """The bound that keeps this from becoming the other bug."""
+        tx, clock = make_tx(max_attempts=4)
+        msg_id = self.register_two_fragments(tx)
+        tx.on_partial(self.partial(msg_id, PEER_B, 2, {0}))
+        tx.on_ack(codec.Ack(ME, msg_id, PEER_A))
+        for _ in range(10):
+            clock.advance(600)
+            tx.tick()
+        self.assertEqual(tx.stats()["pending"], 0, "the message is still pending")
+
+    def test_the_straggler_running_out_is_not_reported_as_a_failure(self):
+        """It WAS acknowledged. Reporting it undelivered would put a false
+        failure on the status screen for a message that was delivered."""
+        tx, clock = make_tx(max_attempts=4)
+        msg_id = self.register_two_fragments(tx)
+        tx.on_partial(self.partial(msg_id, PEER_B, 2, {0}))
+        tx.on_ack(codec.Ack(ME, msg_id, PEER_A))
+        gave_up = []
+        for _ in range(10):
+            clock.advance(600)
+            gave_up += tx.tick()[1]
+        self.assertEqual(gave_up, [], "a delivered message was reported as "
+                                      "undelivered once the straggler timed out")
+        self.assertEqual(tx.stats().get("undelivered", 0), 0)
+        self.assertEqual(tx.stats().get("delivered_incomplete"), 1)
+
+    def test_a_message_nobody_acknowledged_is_still_reported(self):
+        """The counterpart: the fix must not swallow a real failure."""
+        tx, clock = make_tx(max_attempts=4)
+        msg_id = self.register_two_fragments(tx)
+        tx.on_partial(self.partial(msg_id, PEER_B, 2, {0}))
+        gave_up = []
+        for _ in range(10):
+            clock.advance(600)
+            gave_up += tx.tick()[1]
+        self.assertEqual(len(gave_up), 1)
+        self.assertEqual(tx.stats().get("undelivered"), 1)
