@@ -160,6 +160,10 @@ DEFAULT_CONGESTION_INFLIGHT = 4
 # the deadline can never fire before its retries would have finished anyway.
 DEFAULT_DEADLINE_FACTOR = 2.0
 DEFAULT_UNDELIVERED_KEPT = 8
+# Completed fragmented messages whose frames are kept a little longer, so a
+# partial report that lost the race with somebody else's acknowledgement can
+# still be answered. See ReliableTx._revive.
+DEFAULT_FINISHED_KEPT = 16
 DEFAULT_SEEN_TTL_S = 300.0
 DEFAULT_MAX_SEEN = 128
 
@@ -267,7 +271,7 @@ Undelivered = collections.namedtuple(
 class _Pending(object):
     __slots__ = ("msg_id", "origin", "frame", "label", "expected", "acked",
                  "attempts", "next_try", "created", "held", "frag_count",
-                 "required", "deadline")
+                 "required", "deadline", "satisfied")
 
     def __init__(self, msg_id, origin, frame, label, expected, now,
                  required_acks=1):
@@ -292,6 +296,11 @@ class _Pending(object):
         # "no idea", which is treated as holding nothing.
         self.held = {}
         self.frag_count = None
+        # `required` acknowledgements have arrived. The delivery promise is
+        # kept from this moment on, even if the message stays pending to
+        # finish feeding a peer that is still reassembling -- which is what
+        # stops that extra service being reported as a failure later.
+        self.satisfied = False
 
     def missing(self):
         return sorted(self.expected - self.acked)
@@ -301,6 +310,22 @@ class _Pending(object):
         a broadcast destination we hear acks addressed to other senders too,
         and a stranger's ack says nothing about whether OUR recipients got it."""
         return self.acked & self.expected
+
+    def reassembling(self):
+        """Expected peers that have told us they hold SOME fragments and have
+        not since acknowledged.
+
+        Such a peer is not silent and is not finished: it answered, and what
+        it said was "I am missing these". Completing the message while one of
+        them is waiting strands it on a reassembly that can never finish,
+        because nothing else will ever resend what it asked for.
+        """
+        if self.frag_count is None or self.frag_count <= 1:
+            return set()
+        whole = set(range(self.frag_count))
+        return {peer for peer in self.expected - self.acked
+                if self.held.get(peer) is not None
+                and set(self.held[peer]) != whole}
 
     def needed(self):
         """Fragment indices still worth transmitting, or None for "all of it".
@@ -340,6 +365,7 @@ class ReliableTx(object):
                  jitter_s=DEFAULT_JITTER_S,
                  max_inflight=DEFAULT_MAX_INFLIGHT,
                  undelivered_kept=DEFAULT_UNDELIVERED_KEPT,
+                 finished_kept=DEFAULT_FINISHED_KEPT,
                  airtime_s=default_airtime_s,
                  clock=time.monotonic,
                  rng=random.random,
@@ -355,6 +381,7 @@ class ReliableTx(object):
         self.link_latency_s = link_latency_s
         self.congestion_inflight = congestion_inflight
         self.deadline_factor = deadline_factor
+        self.finished_kept = finished_kept
         self.required_acks = required_acks
         self.max_attempts = max_attempts
         self.min_timeout_s = min_timeout_s
@@ -372,6 +399,10 @@ class ReliableTx(object):
         self._clock = clock
         self._rng = rng
         self._pending = collections.OrderedDict()  # msg_id -> _Pending
+        # Completed messages that still have an expected peer which never
+        # answered, kept only so a late partial report can revive them. Small
+        # and bounded; see _revive for why it has to exist at all.
+        self._finished = collections.OrderedDict()  # msg_id -> _Pending
         self._undelivered = collections.deque(maxlen=undelivered_kept)
         # Retired by register() rather than tick(), and handed out on the next
         # tick. register() cannot report them itself: its caller is holding a
@@ -454,7 +485,12 @@ class ReliableTx(object):
         self._stats["sent"] += 1
         while len(self._pending) > self.max_inflight:
             _, oldest = self._pending.popitem(last=False)
-            self._shed.append(self._retire(oldest, DISPLACED))
+            # None when the displaced message had already been acknowledged
+            # and was only being kept to finish feeding a reassembling peer;
+            # it is not a failure, so it is not reported as one.
+            record = self._retire(oldest, DISPLACED)
+            if record is not None:
+                self._shed.append(record)
         return msg_id, wrapped
 
     def forget(self, msg_id):
@@ -527,13 +563,64 @@ class ReliableTx(object):
             pending.acked.add(ack.acker)
             self._stats["ack"] += 1
             if len(pending.confirmed()) >= pending.required:
+                pending.satisfied = True
+            # A peer that reported a partial holding is still owed the
+            # fragments it named, and this entry holds the only copy of the
+            # frame -- completing here deletes it, so nothing can ever answer
+            # that peer again. Measured on the bench 2026-11-12: a two-fragment
+            # broadcast was acknowledged by one phone, a second node reported
+            # "missing [1]", and that fragment was never sent again.
+            #
+            # This does not extend a message's life: the retry timer is not
+            # reset here or in on_partial, and tick() still ends it at
+            # max_attempts or at the deadline.
+            if pending.satisfied and not pending.reassembling():
                 del self._pending[ack.msg_id]
                 self._stats["delivered"] += 1
+                if pending.expected - pending.acked:
+                    # Somebody expected has not answered yet. Keep the frame
+                    # where _revive can find it: their partial report may be
+                    # seconds behind this ack, and on the bench it was.
+                    self._finished[ack.msg_id] = pending
+                    while len(self._finished) > self.finished_kept:
+                        self._finished.popitem(last=False)
                 return pending
             return None
         except Exception:
             self._stats["error"] += 1
             return None
+
+    def _revive(self, partial):
+        """Put a completed message back in flight to answer a late report.
+
+        WHY THIS EXISTS. Keeping a message pending while a peer is known to be
+        reassembling (see on_ack) only helps when the report arrives first. On
+        the air it often does not: measured 2026-11-12, a two-fragment chat was
+        acknowledged by one phone two seconds after it went out and the third
+        node's "missing [1]" arrived two seconds after THAT. By then the frame
+        was gone, so the fragment could never be sent again and that node sat
+        on an unfinishable reassembly while the sender logged DELIVERED.
+
+        Reviving costs nothing unless somebody actually asks: the frame is kept
+        for a bounded number of recent messages and is otherwise never touched.
+        A revived message keeps the attempts it had already spent, so it cannot
+        buy itself a second full schedule, and it stays `satisfied`, so running
+        out later is not reported as a failure.
+        """
+        pending = self._finished.get(partial.msg_id)
+        if pending is None:
+            return None
+        if partial.acker not in pending.expected or partial.acker in pending.acked:
+            # Not somebody we were waiting on, so there is nothing owed.
+            return None
+        if pending.attempts >= self.max_attempts:
+            # No transmissions left to spend; reviving would only have it
+            # retired again on the next tick.
+            return None
+        del self._finished[partial.msg_id]
+        self._pending[partial.msg_id] = pending
+        self._stats["revived"] += 1
+        return pending
 
     def on_partial(self, partial):
         """Record which fragments a peer says it holds. Never raises.
@@ -550,6 +637,8 @@ class ReliableTx(object):
         """
         try:
             pending = self._pending.get(partial.msg_id)
+            if pending is None:
+                pending = self._revive(partial)
             if pending is None or pending.origin != partial.origin:
                 self._stats["partial_unknown"] += 1
                 return
@@ -608,13 +697,17 @@ class ReliableTx(object):
                 # messages that had not yet had their four transmissions.
                 if congested and now >= pending.deadline:
                     del self._pending[msg_id]
-                    gave_up.append(self._retire(pending, CONGESTED))
+                    record = self._retire(pending, CONGESTED)
+                    if record is not None:
+                        gave_up.append(record)
                     continue
                 if now < pending.next_try:
                     continue
                 if pending.attempts >= self.max_attempts:
                     del self._pending[msg_id]
-                    gave_up.append(self._retire(pending, NO_ACK))
+                    record = self._retire(pending, NO_ACK)
+                    if record is not None:
+                        gave_up.append(record)
                     continue
                 if congested:
                     # No attempt consumed, for the reason the caller's own
@@ -636,6 +729,15 @@ class ReliableTx(object):
         return retries, gave_up
 
     def _retire(self, pending, reason):
+        if pending.satisfied:
+            # Its acknowledgements were already in; it only stayed pending to
+            # finish feeding a peer that was still reassembling, and that peer
+            # has now run out of attempts. Reporting "undelivered" for a
+            # message that WAS acknowledged would put a false failure on the
+            # status screen, so it is counted on its own and reported to
+            # nobody. Returning None is what keeps it out of `gave_up`.
+            self._stats["delivered_incomplete"] += 1
+            return None
         self._stats["undelivered"] += 1
         record = Undelivered(pending.msg_id, pending.label, pending.missing(),
                              pending.attempts,
