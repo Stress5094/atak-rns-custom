@@ -22,8 +22,10 @@ has to be created once, kept for the life of the app, and never lost.
 
 ### 1. Create the keystore
 
-Run this on your own machine, not in CI. Choose a strong password and use the
-same one for both prompts if `keytool` asks twice.
+Run this on your own machine, not in CI. It asks for a password, then for
+name and organisation details, which are not checked by anything and can be
+whatever you like — they end up in the certificate, so a project name is
+fine and a home address is not.
 
 ```bash
 keytool -genkeypair -v \
@@ -56,7 +58,18 @@ file is gitignored here precisely so it cannot be committed by accident.
 | `RELEASE_KEYSTORE_BASE64` | the keystore file, base64 encoded (below) |
 | `RELEASE_KEYSTORE_PASSWORD` | the keystore password |
 | `RELEASE_KEY_ALIAS` | `rtak`, or whatever you passed to `-alias` |
-| `RELEASE_KEY_PASSWORD` | the key password (often the same as the store password) |
+| `RELEASE_KEY_PASSWORD` | **the same password again** — see below |
+
+`RELEASE_KEY_PASSWORD` and `RELEASE_KEYSTORE_PASSWORD` hold the same value.
+A PKCS12 keystore cannot have a separate key password; `keytool` says so and
+ignores any `-keypass` you give it:
+
+```
+Warning: Different store and key passwords not supported for PKCS12
+KeyStores. Ignoring user-specified -keypass value.
+```
+
+Gradle still asks for both, so both secrets have to exist.
 
 To produce the base64, as one line with no wrapping:
 
