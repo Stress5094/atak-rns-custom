@@ -111,6 +111,13 @@ jobs:
       - name: Assemble the debug APK
         run: ./gradlew :app:assembleDebug -PbuildPython="$(uv python find 3.9)"
 
+      # The Kotlin side has 13 unit tests, and until now nothing ran them:
+      # assembling an APK compiles the test sources' dependencies but never
+      # executes the tests, so they could have been broken for months without
+      # a red run. They pass; this is what keeps that true.
+      - name: Run the JVM unit tests
+        run: ./gradlew :app:testDebugUnitTest -PbuildPython="$(uv python find 3.9)"
+
       # Not a release: unsigned debug output, useful for pulling onto a phone
       # to check a change without building it yourself.
       - name: Keep the APK

@@ -219,7 +219,23 @@ chaquopy {
             // this is the second line of defence: an IDE that helpfully makes
             // one here cannot put it back. __pycache__ is desktop bytecode for
             // a different Python than the phone runs.
-            exclude(".venv/**", "**/__pycache__/**")
+            //
+            // The test suite is excluded for a different reason: it cannot run
+            // on the phone and nothing on the phone imports it, but every file
+            // in this directory is packaged, so the APK was carrying 1.4 MB of
+            // tests against 1.6 MB of code that actually runs -- about half the
+            // Python payload. The files stay in the repository, where they are
+            // the thing that makes a release trustworthy; they just have no
+            // business on a handset.
+            //
+            // rns_stub is the RNS/pyserial double the suite imports instead of
+            // the real thing, and train_zdict regenerates compact_zdict.py on a
+            // desktop. Both are named in comments in runtime modules, which is
+            // not an import -- checked before excluding them.
+            exclude(
+                ".venv/**", "**/__pycache__/**",
+                "test_*.py", "run_tests.sh", "rns_stub.py", "train_zdict.py",
+            )
         }
     }
 }
