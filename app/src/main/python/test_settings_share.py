@@ -1,6 +1,6 @@
 """settings_share: the rules a phone enforces on a pushed settings bundle,
 against REAL crypto (cryptography) and a fake radio and clock. Plan:
-docs/settings-sharing.md."""
+the settings-sharing notes."""
 
 import json
 import os

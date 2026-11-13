@@ -19,7 +19,7 @@ object RadioLink {
     const val TRANSPORT_BLE = "ble"
     // The FM/codec2 audio link: a USB sound card instead of a KISS-speaking
     // radio. Removed 2026-10-01 and rebuilt from the ground up -- see
-    // docs/fm-lessons.md for the seven weeks of bench work it inherits, and
+    // the FM bench notes for the seven weeks of bench work it inherits, and
     // FmAudioBridgeService/fm_link.py for the rebuild. The value has to match
     // rns_bridge.py's own _transport, which is why it is a constant and not a
     // literal at three call sites.

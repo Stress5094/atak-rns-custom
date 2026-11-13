@@ -48,7 +48,7 @@ for with real bench time, and each looks like a modem that does not work:
     in this build. Measured directly against a real burst at the instant it
     decoded.
 
-See docs/fm-lessons.md for the measurements behind all of it.
+See the FM bench notes for the measurements behind all of it.
 
 LOADED LAZILY, deliberately. The previous modem resolved libcodec2 at module
 import, so merely importing it required the native library -- which meant

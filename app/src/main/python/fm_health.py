@@ -1,6 +1,6 @@
 """What the FM link is actually doing right now, graded rather than binary.
 
-THE PROBLEM THIS EXISTS FOR is docs/open-questions.md item 0f, which this
+THE PROBLEM THIS EXISTS FOR is the project bench notes, item 0f, which this
 project has flagged since 2026-08-16 and never fixed: "a half-deaf node
 looks exactly like a node alone on an empty network". On the FM link that
 is worse than on LoRa, for two reasons that compound.

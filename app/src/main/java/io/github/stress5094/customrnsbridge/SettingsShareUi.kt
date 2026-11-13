@@ -32,7 +32,7 @@ import java.util.Date
 import java.util.concurrent.Executors
 
 /**
- * Settings sharing, the screens (docs/settings-sharing.md: step 2, QR;
+ * Settings sharing, the screens (the settings-sharing notes: step 2, QR;
  * step 3, a host phone on the same WiFi).
  * The rules live in Python (settings_share.py, wired by settings_link.py);
  * this only shows what Python says and passes back what the operator chose.

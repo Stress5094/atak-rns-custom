@@ -128,7 +128,7 @@ class MainActivity : AppCompatActivity() {
         // could not have measured a signal threshold. It was 10/3 until
         // 2026-10-14, which graded the desk Meshtastic link (~6 dB) as weak.
         // Now 0/-7, chosen against the one real-distance reading there is: the
-        // 2026-08-21 drive decoded a beacon at -11.25 dB on SF8 (docs/benches.md).
+        // 2026-08-21 drive decoded a beacon at -11.25 dB on SF8 (the bench notes).
         // Still not a measured threshold, and one figure for every preset --
         // SF8's floor is ~-10 dB, Long Fast's (SF11) ~-17.5. mesh_view.py holds
         // the same numbers and a test keeps the two equal.
@@ -155,7 +155,7 @@ class MainActivity : AppCompatActivity() {
 
     private val handler = Handler(Looper.getMainLooper())
 
-    // Settings sharing (docs/settings-sharing.md). The scanner is registered
+    // Settings sharing (the settings-sharing notes). The scanner is registered
     // here, at construction: an activity-result launcher registered later
     // than onCreate throws.
     private val qrScan = registerForActivityResult(com.journeyapps.barcodescanner.ScanContract()) { r ->
@@ -1949,7 +1949,7 @@ class MainActivity : AppCompatActivity() {
         // burst survived the same channel. A bench button must send the SHAPE
         // the link actually sends -- which now means asking fm_link for the
         // live operating point, the way FmAudioBridgeService does, rather than
-        // carrying numbers of its own. See docs/fm-lessons.md.
+        // carrying numbers of its own. See the FM bench notes.
         //
         // The test tone survives: it is a plain Kotlin sine generator with no
         // dependency on the FM stack, and it is how a VOX/threshold cable's

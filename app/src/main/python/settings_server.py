@@ -1,5 +1,5 @@
 """
-The settings host as a server (docs/settings-sharing.md, step 4): the same
+The settings host as a server (the settings-sharing notes, step 4): the same
 host code a phone runs (settings_net.HostServer, settings_share.Host), as a
 Linux service with an admin command line.
 

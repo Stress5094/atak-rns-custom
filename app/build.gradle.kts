@@ -250,7 +250,7 @@ dependencies {
     // list was kept to three. 1.12 is the newest that builds at compileSdk 34.
     implementation("com.google.android.material:material:1.12.0")
     implementation("com.github.mik3y:usb-serial-for-android:3.7.3")
-    // Settings sharing by QR code (docs/settings-sharing.md): showing one
+    // Settings sharing by QR code (the settings-sharing notes): showing one
     // (zxing core) and scanning one with the camera. Fully offline, unlike
     // Google's code scanner, which needs Play services and may download its
     // model on first use -- in the field, with no signal.

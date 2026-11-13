@@ -1,5 +1,5 @@
 """
-The settings server's admin page (docs/settings-sharing.md, step 4): the
+The settings server's admin page (the settings-sharing notes, step 4): the
 roster live, allow / revoke, a push form, and the server's code for phones to
 scan. Started by `settings_server.py serve --web-port 8080`.
 

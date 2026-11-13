@@ -1,5 +1,5 @@
 """
-Settings sharing over a network (docs/settings-sharing.md, steps 3 and 4): a
+Settings sharing over a network (the settings-sharing notes, steps 3 and 4): a
 host says it is there on the local network (or is added by address), phones
 connect to it, the host pushes a bundle to each, and each phone reports back
 what became of it -- the host's roster.

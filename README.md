@@ -15,7 +15,14 @@ ATAK <-> this app <-> radio <-> [air] <-> radio <-> this app <-> ATAK
 
 Everything else is in the **[User guide](docs/USER-GUIDE.md)**: every screen
 and button, and the routing and repeating rules for RNodes and Meshtastic
-boards.
+boards. [Releasing](docs/RELEASING.md) covers building and publishing a signed
+APK.
+
+Comments in the source sometimes cite "the bench notes" for a measurement.
+Those are the project's working records of seven weeks of radio testing, and
+they are not published here: they are long, they are written for one reader,
+and they carry the places and equipment the tests were run with. Where a
+number in them matters, it is repeated in the comment that cites them.
 
 ## What you need
 

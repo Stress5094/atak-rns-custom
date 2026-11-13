@@ -742,7 +742,7 @@ def _read_table_byte(table, buf, off):
 # Marker identifiers and icons (protocol 16)
 # ---------------------------------------------------------------------------
 # An ATAK marker spends most of its bytes on text ATAK derived from something
-# else it also sends. Measured on four real captures (docs/open-questions.md,
+# else it also sends. Measured on four real captures (the project bench notes,
 # 2026-10-12): the event uid is a 36-character UUID, the sender's own id is
 # "ANDROID-" + 16 hex digits, the icon path is 28-74 characters that mostly
 # restate the event type or the colour, and the callsign is often the icon's

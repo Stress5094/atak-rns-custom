@@ -51,7 +51,7 @@ import android.util.Log
  * starts and ends within a few hundred ms of the logged key()/unkey() calls;
  * (b) two real chat messages sent that same session both decoded byte-perfect
  * on the receiving end. **This directly contradicts the 2026-09-19 finding
- * recorded in setGpio()'s comment below and in docs/open-questions.md ("no
+ * recorded in setGpio()'s comment below and in the project bench notes ("no
  * real transmission ever got through... points at the cable's physical PTT
  * wiring instead")** -- on THAT phone/cable/radio combination, that day, the
  * wiring was fine and PTT worked cleanly. The earlier finding is not
@@ -247,7 +247,7 @@ class Cm108Ptt(private val context: Context) {
         // one this device's descriptor actually accepts (controlTransfer
         // succeeds every time). On 2026-09-19's hardware, accepting the
         // command never produced a real transmission -- pointed at that
-        // cable's physical PTT wiring, see docs/open-questions.md, "the
+        // cable's physical PTT wiring, see the project bench notes, "the
         // OPPOSITE transmit-direction asymmetry" section. **On 2026-09-20's
         // hardware (a different phone/cable/radio pairing), this exact
         // 4-byte form DOES key the radio and carries real, byte-perfect

@@ -2,7 +2,7 @@
 Settings sharing, wired to this app: the Kotlin entry points for the share /
 scan / approve screens, and the bridge's radio as settings_share.Receiver's
 injected radio. The rules are settings_share's; this file only says where
-each setting lives. Plan: docs/settings-sharing.md.
+each setting lives. Plan: the settings-sharing notes.
 
 WHERE EACH SETTING LIVES
 

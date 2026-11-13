@@ -253,7 +253,7 @@ class TestTheContractCallersDependOn(unittest.TestCase):
         # instead, so a FUTURE accidental change to these constants is still
         # caught, without pretending the original guarantee still holds.
         # See fm_resend.py's DEFAULT_INTERVAL_S comment and
-        # docs/open-questions.md for the full reasoning.
+        # the project bench notes for the full reasoning.
         WORST_RECORDED_CLUSTER_S = 576.0
         self.assertLess(fm_resend.span_s(), WORST_RECORDED_CLUSTER_S)
         self.assertAlmostEqual(fm_resend.span_s(), 227.0, delta=1.0)
@@ -424,7 +424,7 @@ class TestTheSpanSizesTheReceiveSide(unittest.TestCase):
         docstring. At p=0.5 with 8 fragments over 4 attempts, fragments
         accumulating across attempts gives ~60% deliverable and each attempt
         having to land whole gives ~1.6%. The measured figures agree
-        (docs/open-questions.md:2291: ~60% against under 2%).
+        (the project bench notes: ~60% against under 2%).
 
         rns_bridge does NOT use that default -- it derives the window from this
         span, and test_rns_bridge_wiring asserts the derivation. This test

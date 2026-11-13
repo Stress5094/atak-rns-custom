@@ -8,7 +8,7 @@ nobody can name.
 
 The load is a room chat because that is the traffic acknowledgement applies to
 -- positions are fire-and-forget and self-healing, so a flood of them measures
-the radio rather than the mesh. See docs/routing.md.
+the radio rather than the mesh. See the routing notes.
 """
 
 import random

@@ -1,7 +1,7 @@
 """
 Settings sharing, the core: a host signs a bundle of settings, a phone checks
 it, shows what would change, and applies it only with the phone's own PIN or
-because the operator chose to trust that host. Plan: docs/settings-sharing.md.
+because the operator chose to trust that host. Plan: the settings-sharing notes.
 
 Free of RNS and Android imports, with the clock and the radio injected, so the
 same file runs in the app (Chaquopy), on a server (the host side), and in the

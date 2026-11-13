@@ -2574,7 +2574,7 @@ class TestStatusTick(unittest.TestCase):
     real LoRa<->FM failover field test: this line used to hardcode
     _lora_iface for its online/txb/rxb/duty numbers, so during an FM
     failover it silently described LoRa's now-idle state instead of the
-    link actually carrying traffic. See docs/open-questions.md."""
+    link actually carrying traffic. See the project bench notes."""
 
     def setUp(self):
         self._orig_link_ifaces = dict(rns_bridge._link_ifaces)
@@ -3203,7 +3203,7 @@ class TestBeaconSlotCannotCollideForever(unittest.TestCase):
         """Two nodes that land on different slots are separated by at least
         one full slot width -- which is the property that makes the grid
         work, since _beacon_slot_s() sizes that width above the link's own
-        burst length (see its comment, and docs/fm-lessons.md on why a grid
+        burst length (see its comment, and the FM bench notes on why a grid
         narrower than one burst separates nobody).
 
         Asserted against the width the link actually reports rather than a
@@ -3365,7 +3365,7 @@ class TestTheReassemblyWindowCoversEveryRetrySchedule(unittest.TestCase):
     Getting this wrong is the worst kind of bug this codebase has: fragments
     accumulated across attempts are discarded just before the attempt that
     would have completed them, which takes a multi-fragment message from roughly
-    60% deliverable to under 2% (docs/open-questions.md:2291) and is visible
+    60% deliverable to under 2% (the project bench notes) and is visible
     from nowhere except a delivery rate. It looks exactly like a bad radio.
     """
 
@@ -3591,7 +3591,7 @@ class TestTheFmTestHooks(unittest.TestCase):
 
 class TestFmReciprocalBeacon(unittest.TestCase):
     """Closes the asymmetry found live 2026-09-26 (see the project memory /
-    docs/open-questions.md): a node that fails over to FM stays visible to
+    the project bench notes): a node that fails over to FM stays visible to
     its peer, because its own beacon now arrives over FM -- but nothing
     made the HEALTHY peer beacon back over FM, so IT could go invisible on
     the failed-over node's map for the whole outage. _beacon_tick() must

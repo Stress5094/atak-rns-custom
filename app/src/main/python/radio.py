@@ -43,7 +43,7 @@ PRESETS = collections.OrderedDict([
 # ~10), and at Long Fast the relay bucket refuses ordinary chat bursts: the
 # same six-chat line delivered 6/6 round trips on Short Slow against 2-3/6 on
 # Long Fast, and 15 min of real ATAK traffic peaked at 1.0 s of relay in a
-# minute against 6.3 s (docs/open-questions.md, the relay bucket section).
+# minute against 6.3 s (the project bench notes, the relay bucket section).
 # The cost is range: Short Slow (SF8/250 kHz) is several dB less sensitive
 # than Long Fast (SF11), which has never been measured at distance here.
 #

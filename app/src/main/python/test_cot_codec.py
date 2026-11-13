@@ -2805,7 +2805,7 @@ def _real_marker(cot_type, callsign, icon=None, argb="-1",
 
 
 # What fits in one FM burst after the 12 B envelope and the 3 B reliable
-# wrapper. Measured 2026-10-12; docs/open-questions.md has the derivation.
+# wrapper. Measured 2026-10-12; the project bench notes have the derivation.
 ONE_PACKET_FM_B = 110
 
 

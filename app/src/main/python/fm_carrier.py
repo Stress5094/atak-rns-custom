@@ -8,7 +8,7 @@ idle for the WHOLE burst and goes busy only after it has ended -- the frame is
 a second long, where "after the burst" and "during the burst" were nearly the
 same moment.) A node that checked the channel while another was mid-burst
 therefore read "clear" and keyed up over it. That is the 15-of-20 overlaps in
-docs/open-questions.md that began 1.1-3.4 s INTO a burst already in progress.
+the project bench notes that began 1.1-3.4 s INTO a burst already in progress.
 
 WHAT IT MEASURES. In every symbol of 4FSK exactly one of the four tones is
 present; in noise the energy is spread across them. For each symbol-length block
@@ -77,7 +77,7 @@ that idles above that can read busy until it has learned (measured: discriminato
 tilted noise, up to ~6 s). `strong` (the old 0.66 mark) is what fm_airlog times
 carriers by. Modem73's coded lead-in tone flags 40/40 down to -6 dB too, but it
 adds 0.85 s to every burst and covers only its first second; see
-docs/open-questions.md.
+the project bench notes.
 """
 
 import math

@@ -27,7 +27,7 @@ samples of the same bad patch. Worse, they lengthen the burst, which is the one
 thing the channel consistently punishes. Redundancy against the real failure
 mode is time diversity -- re-sending the same frame minutes later, so each
 attempt samples an independent channel state -- and it belongs in a scheduler,
-not here. See docs/fm-lessons.md sections 3.3 and 3.4.
+not here. See the FM bench notes, sections 3.3 and 3.4.
 
 WHICH IS WHY THE NUMBERS LEFT THIS FILE. `repeats` and the lead-in used to be
 module constants here, carrying exactly that argument in their comments, while

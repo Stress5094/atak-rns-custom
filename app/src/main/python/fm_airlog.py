@@ -4,7 +4,7 @@ WHY THIS EXISTS. 2026-10-09's baseline sent 26 bursts and the phone decoded 21.
 The phone could say that 5 were missing (a gap in the sender's sequence
 numbers) and nothing about WHY, so the loss could not be told apart from "the
 receiver was transmitting at the time" -- and on this link that is most of it
-(`docs/open-questions.md`: three of four beacon losses on 2026-10-03 were the
+(the project bench notes: three of four beacon losses on 2026-10-03 were the
 receiver keying up; a half-duplex radio leaves no trace of what it missed).
 
 WHAT CAN AND CANNOT BE KNOWN. A receiver can only describe a burst whose carrier

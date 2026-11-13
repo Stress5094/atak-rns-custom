@@ -46,7 +46,7 @@ bad patch. Worse, they lengthen the burst, and burst duration is the one
 thing this channel has consistently punished.
 
 The measured structure of the failure is what makes spacing work. From
-docs/open-questions.md's FM sections: batches run back-to-back scored 4/4
+the project bench notes' FM sections: batches run back-to-back scored 4/4
 and 24/24 at settings that scored 2/10 and 4/10 when the same trials were
 spread across an hour, and the failures arrive in CLUSTERS (19 straight
 failures in one 9.6-minute stretch; 3 straight passes in the next 8
@@ -57,7 +57,7 @@ later is a genuinely independent sample.
 2026-09-20: DEFAULT_INTERVAL_S was deliberately shortened from 240s to 60s
 on an explicit user request, trading away FULL coverage of the worst
 clusters above for faster typical-case delivery -- see DEFAULT_INTERVAL_S's
-own comment below and docs/open-questions.md for the exact numbers. This is
+own comment below and the project bench notes for the exact numbers. This is
 a known, chosen gap, not an oversight: at 60s a schedule can finish inside
 one of the longer recorded clusters.
 
@@ -183,7 +183,7 @@ DEFAULT_ATTEMPTS = 5
 # ATTEMPTS accordingly, rather than assuming a new bug. Not a measured
 # optimum either way: nobody has characterised the cluster length
 # distribution properly (that needs the multi-hour passive monitoring run
-# docs/open-questions.md has called for twice).
+# the project bench notes have called for twice).
 DEFAULT_INTERVAL_S = 60.0
 
 # The gap before attempt 2 ONLY -- every later gap (2->3, 3->4, 4->5) still

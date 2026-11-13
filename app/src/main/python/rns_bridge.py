@@ -219,8 +219,8 @@ LINK_WIFI = "wifi"
 # entry) degrades gracefully back to LoRa-only behaviour.
 #
 # FM WAS REMOVED FROM HERE on 2026-10-01 and restored on 2026-10-02, rebuilt
-# from the ground up against the bench record in docs/fm-lessons.md and
-# docs/open-questions.md. That re-adding it is one entry in this tuple plus a
+# from the ground up against the bench record in the FM bench notes and
+# the project bench notes. That re-adding it is one entry in this tuple plus a
 # _build_fm_interface() is the property that made it worth excising as a
 # registry entry rather than unpicking it line by line -- the failover
 # machinery is N-way and needed no other change.
@@ -335,7 +335,7 @@ def _reassembly_window_s(include_fm=True, airtime_s=None):
     partial holding one of Reassembler's 16 slots for longer, which is bounded
     and visible -- the cap evicts oldest-first and counts it in `dropped`.
     Under-sizing takes a multi-fragment message from roughly 60% deliverable to
-    under 2% (docs/open-questions.md:2291) and is visible from nowhere except a
+    under 2% (the project bench notes) and is visible from nowhere except a
     delivery rate. So `include_fm` defaults to True: the import-time value is a
     safe floor for any transport, and _resize_reassembly tightens it once
     Kotlin has said which transport this actually is.
@@ -2621,7 +2621,7 @@ def _build_wifi_interface():
             # difference). Kept anyway -- it is still a real correctness
             # fix (three of four address-building call sites already did
             # this; only this one didn't) even though it isn't sufficient
-            # by itself. See docs/open-questions.md's "WiFi multicast peer
+            # by itself. See the project bench notes' "WiFi multicast peer
             # discovery" entry for the full chain of eliminated hypotheses
             # and what's actually left to try (packet capture, or a
             # different AP/router entirely).
@@ -2727,7 +2727,7 @@ def _build_wifi_interface():
 # can still find and be found the normal way on a network where IPv6
 # multicast actually works.
 #
-# Confirmed live (2026-09-24, both phones -- docs/open-questions.md's "WiFi
+# Confirmed live (2026-09-24, both phones -- the project bench notes' "WiFi
 # multicast peer discovery" entry has the full chain): every attempt at
 # getting this app's OWN IPv6 multicast sends to reach another instance of
 # itself failed -- Network.bindSocket() (three variants), IPV6_MULTICAST_IF
@@ -4753,7 +4753,7 @@ def _beacon_tick():
     unchanged from before this function existed).
 
     The FM RECIPROCAL beacon closes a real gap found live 2026-09-26 (see
-    the project memory / docs/open-questions.md): a node that fails over to
+    the project memory / the project bench notes): a node that fails over to
     FM stays visible to its peer, because ITS OWN beacon now arrives over
     FM -- but nothing ever made the HEALTHY peer transmit over FM too, so
     that peer could go invisible on the failed-over node's map for as long

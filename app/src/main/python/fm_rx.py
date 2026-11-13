@@ -234,7 +234,7 @@ class FmRx(object):
         DECODES, and a frame is 2.6 s of a 2.95 s burst. A node that listened
         while another was mid-burst heard a clear channel and keyed up over it
         (15 of 20 overlaps in the 2026-10-03 two-phone run). Measured, with the
-        trace, in docs/open-questions.md.
+        trace, in the project bench notes.
 
         MUST NOT BECOME AN ENERGY THRESHOLD. This project's receive audio sits
         at an RMS of roughly 0.65-0.75 with zero real traffic, so no level

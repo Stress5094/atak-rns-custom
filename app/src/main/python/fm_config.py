@@ -4,7 +4,7 @@ WHY THIS MODULE EXISTS AT ALL. The transport this replaces kept its operating
 point as eight module-level globals in a 1045-line file, each carrying a
 revision log of every value it had ever held and why that value had been
 reverted. Those logs were genuinely valuable -- they are most of what
-docs/fm-lessons.md is made of -- but as a way to answer "what is this link
+the FM bench notes are made of -- but as a way to answer "what is this link
 configured as, and is that configuration even legal", they failed in three
 specific ways:
 
@@ -26,7 +26,7 @@ specific ways:
 So: one Profile object, validated on construction, carrying the hardware it
 was measured on and what it measured. An unmeasured profile is not a
 convenience, it is a way for an operator to select a dead link from a
-hillside -- see docs/fm-lessons.md.
+hillside -- see the FM bench notes.
 
 AND ONE LinkConfig ON TOP OF IT, which is the same argument applied to the
 constraint that actually decides whether this link delivers: BURST DURATION.
@@ -64,7 +64,7 @@ import fm_framing
 # Hard constraints.
 #
 # Each of these is a measured property of real hardware or a hard requirement
-# of the decoder, NOT a tuning preference. docs/fm-lessons.md section 1 has
+# of the decoder, NOT a tuning preference. the FM bench notes, section 1 has
 # the evidence for each. They are module constants rather than magic numbers
 # inside the validator so a test can assert against them by name, and so the
 # error messages below can quote the figure they are enforcing.
@@ -77,8 +77,8 @@ import fm_framing
 # comment said it was. The desktop bench ran 48000 Hz -- the rate both USB
 # sound cards lock their capture to (`arecord --dump-hw-params`), chosen so
 # that nothing resamples between the card and the demodulator. So a figure
-# from docs/open-questions.md was taken at 48000 unless it says otherwise,
-# and `docs/fm-lessons.md` section 2's table lists 8000 with a dash for its
+# from the project bench notes was taken at 48000 unless it says otherwise,
+# and the FM bench notes, section 2's table lists 8000 with a dash for its
 # source because nothing fixed it.
 #
 # THIS MATTERS FOR MORE THAN BOOKKEEPING, because codec2 requires
@@ -156,7 +156,7 @@ MIN_SAMPLES_PER_SYMBOL = 8
 # measured 30/30 clean with every in-burst copy decoding, on the two-Digirig
 # desktop bench. It is a CEILING, not a target: raise it only alongside new
 # bench evidence that a longer burst still arrives, never to make a payload
-# fit. See docs/fm-lessons.md section 1.3.
+# fit. See the FM bench notes, section 1.3.
 MAX_BURST_S = 11.5
 
 class ProfileError(ValueError):
@@ -194,7 +194,7 @@ class ProfileError(ValueError):
 # THERE IS NOTHING BETWEEN 32 AND 128 BYTES, which makes "pick the smallest
 # code that fits" a far coarser choice than it sounds. H_4096_8192_3d is
 # present and measured BADLY: 100% delivery but only 56-69% per copy, at a
-# 34 s burst. See docs/fm-lessons.md section 3.2.
+# 34 s burst. See the FM bench notes, section 3.2.
 CODES = {
     "H_128_256_5":    (128, 256),
     "H_256_512_4":    (256, 512),
@@ -673,7 +673,7 @@ class Profile(object):
                 "transitions), not a software setting: 375, 480 and 500 Bd all "
                 "measured 0-1/4 delivered with a healthy signal level, so no "
                 "gain adjustment rescues it. Raise symbol_rate_ceiling_bd only "
-                "with a measurement on THIS chain -- see docs/fm-lessons.md "
+                "with a measurement on THIS chain -- see the FM bench notes "
                 "section 1.2."
                 % (self.name, self.symbol_rate_bd, self.symbol_rate_ceiling_bd))
 
@@ -760,7 +760,7 @@ class Profile(object):
         Spells out the frequencies AND names the profile, because the two
         answer different questions: the name is what two operators compare,
         and a mismatch between them is total silence with nothing in either
-        log to say so -- see docs/fm-lessons.md section 1.1. This line being
+        log to say so -- see the FM bench notes, section 1.1. This line being
         compared by eye was the only mismatch check that ever existed.
         """
         return "FM tones: %s - %s Hz @ %d Bd (both ends must match exactly)" % (
