@@ -116,6 +116,32 @@ The dialog asks two questions:
 - **Which radio:** with one radio paired, it is picked for you. With several,
   tap the one this phone should use; Save asks you to pick one.
 
+**FM station ID and encryption.** This section appears whenever FM is in use.
+Both settings are for licensed amateur operation, where the rules require you
+to identify and forbid obscuring what you are sending.
+
+- **Callsign** (blank = off): sent as an audible Morse tone, in the clear,
+  taking about 5 s, every **10 minutes** by default. 3 to 12 letters, digits
+  and `/`, with at least one digit; anything else is refused when you save.
+  The first one goes out shortly after the FM link comes up, then on the
+  interval. Nothing is sent while *Test mode: receive only* is on.
+  - The interval can be set from 1 to 120 minutes. **US Part 97 requires
+    every 10 minutes**, so the app will let you choose an interval that your
+    licence does not. That is left to you on purpose; the app does not know
+    where you are.
+- **Send FM unencrypted:** sends FM traffic as plain text. **LoRa stays
+  encrypted either way** — this changes nothing about the LoRa link. Every
+  phone on the FM net has to match, because a phone with it off ignores the
+  plain frames a phone with it on sends.
+  - **A plain frame proves nothing about who sent it.** Encryption and
+    authentication are the same step here, so turning it off also gives up
+    the check that keeps strangers from putting markers on your map. On FM,
+    in this mode, anyone within range can. That is the trade the amateur
+    rules ask for, and it is worth being clear-eyed about.
+  - It travels with shared settings like any other net-wide setting. A phone
+    running a build older than this feature refuses the whole bundle and says
+    to update the app.
+
 **Advanced options.** These only appear after you turn on *Advanced → Show
 advanced features*. Turning the switch off hides them again but keeps their
 values.
@@ -189,7 +215,7 @@ The tab you use day to day.
   | *No traffic* | no one is sending; a warning, not a fault | nothing yet |
   | *Garbled* | signal arrives but won't decode | adjust the volume knob as the level readout says |
   | *Silent* | no audio at all | check the radio |
-  | *No audio* | the app's audio path itself is broken | restart the bridge |
+  | *No audio* | the app has no sound card to listen to | check the cable first — this usually means the USB sound card has dropped off the bus, and a bridge restart cannot bring back a device Android cannot see |
 - **Link buttons:** one button per link.
   - *active* (filled): the link carrying traffic now.
   - *backup* (outlined): set up and listening, ready to take over.
@@ -199,7 +225,8 @@ The tab you use day to day.
     to change*).
   - If a link has been forced from the Advanced tab, a warning line says so.
 - **Tiles:**
-  - **Airtime:** this node's share of the channel. A warning shows above 30%.
+  - **Airtime:** this node's share of the channel. It turns amber above 10%
+    and red above 25%.
   - **Channel:** how busy the channel is.
   - **Waiting:** messages queued.
   - **Undelivered:** one-shot messages that ran out of retries.
@@ -222,13 +249,16 @@ Bench and field-test tools.
 - **Advanced features:** **Show advanced features** reveals:
   - **Show the Share tab:** off by default. *Share settings* and *Scan QR* on the
     Status tab work either way. With the tab hidden, settings offers that
-    arrive over Wi-Fi open as a dialog instead.
+    arrive over Wi-Fi open as a dialog instead. Once shown, the Share tab
+    stays even if you turn advanced features back off; switch it off here to
+    hide it again.
   - **Show detailed status on the Status tab:** off by default. When off, the
     Status tab hides its informational lines: the build stamp, the full radio
     line, the FM net code and settings, the FM receive summary, the re-send
     counts and the **Diagnostics** section (channel noise and the position
     policy counters).
     Warnings always show, including which way to turn the volume knob.
+  - **Auto-erase:** see [below](#auto-erase).
   - **Link:** **Auto** lets the app choose. **Force LoRa / Force FM / Force
     WiFi** pins one link after you confirm. Health is still measured
     underneath, so going back to *Auto* resumes cleanly. A `*` marks the
@@ -254,6 +284,55 @@ Bench and field-test tools.
   - **Restart bridge:** stops the radio, ATAK connection and mesh, then starts
     them again. Rarely needed by hand: the app offers a restart itself
     whenever a change needs one.
+
+#### Auto-erase
+
+Erases every setting and key on this phone after a set time, for a phone that
+may be lost or taken. Off by default, and hidden unless *Show advanced
+features* is on.
+
+Two timers, either or both:
+
+- **Erase all settings after a set time** — a dead man's handle. It runs down
+  whatever you do.
+- **Erase all settings if no peer is heard after a set time** — it runs down
+  only while no other node is heard, and hearing one puts it back to the start.
+
+Turning a switch on arms it at 1 day (the first) or 1 hour (the second). The
+button under each one offers 1 hour, 6 hours, 12 hours, 1 day, 2 days, 7 days
+or 30 days. **There is nothing shorter than an hour**, deliberately.
+
+Changing either timer restarts **both** countdowns.
+
+**What a wipe takes.** The passphrase, this node's id, the radio settings, the
+transmit counter, everything settings sharing keeps (your PIN, the trusted
+hosts and this phone's host key), the diagnostic dumps, the logs, Reticulum's
+own directory including the long-term identity it keeps there, and the app's
+saved preferences — which includes **which radio this phone was paired to**.
+
+**A wiped phone is a new phone.** It comes back with a node id it has never
+used before, a passphrase it invented for itself, and the default radio
+settings — so other phones list it as a new node, and giving it the team
+passphrase back is *not* enough to put it on the air. Its radio has to be
+chosen again in [Radio link](#3-connecting-the-radio).
+
+**The clock.** Each timer counts seconds it has actually been running, charged
+as the larger of two readings: the phone's uptime clock (which keeps counting
+while the phone is asleep) and the wall clock (which covers the time the phone
+was switched off). Two things follow:
+
+- **Winding the date back does not postpone a wipe.** This was a real hole and
+  was closed; setting the date back a year used to buy a year.
+- **Winding the date forward can fire it early.** A timezone change or a clock
+  correction counts as time passed. Early is the safe direction for a phone
+  that may be lost, but it is a real cost, not a side effect nobody noticed.
+
+**What it cannot do.** The countdown only runs while the bridge is running, so
+anyone who can stop the app can stop the clock. This protects a phone that is
+lost, not a phone in the hands of someone who knows what to stop.
+
+A wipe disarms the feature, because the file holding the countdown is erased
+along with everything else.
 
 ### Network → Mesh
 
@@ -468,6 +547,18 @@ dropped 84% of position reports.
   passphrase can read positions or put fake markers on your map.
 - Repeats of the same frame are recognised and dropped. The app remembers
   frames for 300 s, up to 512 of them.
+- Beyond that, each sender has its own replay window — the last 128 counter
+  values, across 4 retired counter generations — so a frame recorded off the
+  air and played back hours later is still refused.
+- Plain frames (see *Send FM unencrypted* in
+  [section 3](#3-connecting-the-radio)) are remembered in a separate list from
+  encrypted ones, so a stranger sending plain frames cannot push the record of
+  real traffic out of memory.
+- Each passphrase allows a limited number of app starts — 256 — before the
+  phone stops transmitting, because going further would start reusing the
+  numbers that keep each frame's encryption unique. The count is kept per
+  passphrase, so changing to a new one starts a fresh count and changing back
+  resumes the old one. See [section 12](#12-troubleshooting).
 
 **Beacons and the peer table** (`peers.py`)
 
@@ -499,7 +590,7 @@ if you turned it on and its hardware is attached.
    The 30 s is a starting value, not a measured one.
 4. **What "unhealthy" means:**
    - **Hard:** the radio is unplugged, disconnected or offline.
-   - **Soft (LoRa and Wi-Fi):** over the last 300 s, more than half of the
+   - **Soft (LoRa and Wi-Fi):** over the last 300 s, half or more of the
      one-shot messages got **no acknowledgement at all**. At least three
      messages are needed before this counts. A busy channel doesn't count as
      unhealthy, because moving to a slower radio wouldn't help.
@@ -681,7 +772,9 @@ lost one.
   still show it in ATAK, but don't answer, so one chat doesn't trigger a crowd
   of replies.
 - A receiver missing some fragments says which ones it has, and the retry
-  sends only the missing ones.
+  sends only the missing ones. This holds even when another node has already
+  acknowledged the message: one node having it does not end the job for a node
+  that is still waiting on a piece.
 - Acknowledgements are spread over random 0.15 s slots, up to 1 s, so they
   don't collide. Up to 8 share one transmission.
 - A repeat of a message that already arrived is acknowledged again, but not
@@ -719,7 +812,7 @@ changes at once and nobody is left on the old settings
 **What can be shared**
 
 - LoRa preset, frequency and power
-- the FM settings or net code
+- the FM settings or net code, and whether FM is sent unencrypted
 - the coverage model
 - optionally, the passphrase
 
@@ -736,20 +829,39 @@ changes at once and nobody is left on the old settings
 - **Settings server:** `server/` runs the same host code on Linux, with an
   admin command line and a local-only web page. Phones connect to TCP port
   47812. See [server/README.md](../server/README.md).
+  - The server pushes the **LoRa settings, the coverage model and the
+    passphrase only**. It cannot push the FM settings, the net code or
+    *Send FM unencrypted*, although a phone can share all three. (Its
+    `--fm-mhz` and `--fm-w` options are part of the coverage model — the
+    power and frequency used to *predict* FM coverage — not the FM radio
+    settings.)
 
 **Safety rules**
 
-- Every bundle is signed by the host, and its revision number only ever goes
-  up, so an old bundle can't be replayed.
+- Every bundle is signed by the host, and a bundle whose revision is one this
+  phone has already decided on is refused, so an old bundle can't be replayed
+  against a phone that has acted.
+  - One gap, worth knowing: while an offer is still **waiting for your PIN**,
+    a recorded older bundle from the same host can take its place, and what
+    you are then shown to approve is the older settings. Check the settings
+    on the screen rather than assuming they are the ones you were told to
+    expect.
 - A phone applies a bundle only with its own **PIN**:
   - 4 to 12 digits
-  - 5 tries, then a 60 s lock
+  - 5 wrong tries, then a 60 s lock. Five more doubles it to 120 s, and
+    again to 240 s, and so on.
   - or automatically, if the phone has chosen to trust that host
 - A shared passphrase is sealed to one phone's key. No other device can read
   it in transit.
 - Changes are scheduled for a common moment, 2 minutes ahead by default, so
   the whole group switches together. Each phone keeps an **Undo**.
 - Settings are never shared over the radio, so sharing costs no airtime.
+- **A phone with no radio connected still takes the settings.** The passphrase
+  needs no radio at all, and the radio settings are saved and applied to the
+  radio when it next connects, so a phone whose RNode is flat or unplugged can
+  still be given the team key. The screen says they were saved but not yet
+  sent. A radio that is connected and *refuses* the settings is still a real
+  failure and is reported as one.
 
 ## 12. Troubleshooting
 
@@ -766,6 +878,9 @@ changes at once and nobody is left on the old settings
 | *COUNTER FILE WAS LOST* | The phone forgot how far it had counted, so it came back with a new node id. Other phones will list it as a new node. Change the passphrase soon. |
 | FM *Garbled* | Receive volume wrong. Follow the level readout. Too high is as bad as too low. |
 | FM *Silent* | Radio off, squelch closed, or cable unplugged. |
+| FM *No audio* | Android cannot see the USB sound card. Unplug it and plug it back in; restarting the bridge will not help, because the device is not there to open. |
+| No Morse station ID goes out | No callsign set, or *Test mode: receive only* is on. |
+| This phone came back as a new node, with nothing set up | [Auto-erase](#auto-erase) fired. Giving it the passphrase back is not enough: its radio has to be chosen again in *Radio link*, and its sharing PIN and trusted hosts are gone too. |
 | A message under *Messages* / *Undelivered* | It got no acknowledgement after every retry. Resend, or move closer. |
 | High *Airtime* | Too many nodes or too slow a preset. See the preset table in [section 6](#network-settings). |
 
@@ -778,13 +893,22 @@ For a field problem, use *Advanced → Start log*, reproduce the problem, then
 
 - the codec
 - the position policy (84% of reports dropped on a drive)
-- acknowledged delivery with honest failure reporting
+- acknowledged delivery with honest failure reporting, in both directions,
+  for broadcast chat and for a chat addressed to one node
 - the encrypted mesh
-- repeating across a middle node
 - Bluetooth to the RNode
 - Meshtastic boards as the radio
 - two phones meshing over FM, with heard-reports stopping repeats in both
   directions
+- **repeating, on three nodes in a line** (2026-11-12): a frame relayed by the
+  middle phone in both directions, the hop budgets spending exactly one hop
+  per relay, beacons never relayed, nothing relayed at all while every node
+  could hear every other, and a node reached only through the relay correctly
+  counted as reachable rather than as a neighbour
+- **fragmented messages**: a chat split into two packets, delivered whole, and
+  relayed as fragments by the middle phone
+- **auto-erase**, fired on a phone: keys, node id, radio settings, counter and
+  logs all gone, and the feature disarmed itself afterwards
 
 **Load figures** come from two to four nodes. Behaviour at sixteen nodes is
 modelled, not measured.
@@ -805,6 +929,24 @@ high is the likely cause; that is inferred, not proven.
 - the gateway between FM and LoRa (not switched on)
 - the newest frame-size savings
 - FM settings sharing between two radios
+- the Morse station ID and *Send FM unencrypted* — the station ID has never
+  keyed a radio in a test, and unencrypted FM has been decoded by a laptop
+  listener but not between two phones
+- repairing a part-received message: a receiver that is missing fragments does
+  report exactly which ones, and that was watched happen on the air; the
+  sender's answer to it is covered by tests but has not been reproduced on
+  radios since it was fixed
+
+**Not exercised at all yet**
+
+- markers, drawings and routes end to end — chat is the only one-shot traffic
+  that has been driven through ATAK on both phones
+- duplicate suppression and the retry schedule. Every message on the bench so
+  far has been acknowledged on its first transmission at a few metres, so
+  nothing has ever had to retry, and no duplicate has ever arrived to be
+  suppressed. These need a degraded link, not another run on a desk.
+- the repeating airtime budget's ceiling. The budget is charged and recovers
+  as designed, but no run has come near spending it.
 
 **First guesses, not measurements**
 
