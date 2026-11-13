@@ -1182,7 +1182,7 @@ class FmPowerTest(unittest.TestCase):
 
     def test_less_power_reaches_less_far_through_a_street(self):
         # Houses 200 m apart: at 50 m the reach stops in the same house's
-        # shadow at every power (the 20 m-step artefact in coverage.claude).
+        # shadow at every power (the 20 m-step artefact in the coverage model).
         idx_b = [bldg(0.0, 200.0 + i * 200.0) for i in range(10)]
         idx = coverage._build_index(idx_b, coverage._CELL)
 

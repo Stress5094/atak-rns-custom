@@ -10,7 +10,6 @@ __pycache__/
 *.pyc
 .venv/
 
-.claude/settings.local.json
 *.wav
 
 # Built by tools/build_libcodec2_android.sh: a compiled binary tied to one
