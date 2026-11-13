@@ -582,3 +582,246 @@ class FoundHostsTest(_Fixture):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------------------------------------------------------------------------
+# A BUNDLE MUST STILL APPLY WITH NO LORA RADIO CONNECTED (fixed 2026-11-12).
+#
+# Every group in settings_link._apply is applied whole or not at all, and
+# settings_share.Receiver._apply_offer puts the WHOLE bundle back if any group
+# reports a problem. So while the radio group counted "there is no radio" as a
+# problem, a phone with no radio attached could not be given the group
+# passphrase -- which needs no radio whatsoever.
+#
+# Measured on the Pixel 2026-11-12: two bundles set a new key, the radio group
+# raised PortNotOpenError('Attempting to use a port that is not open'), and the
+# put-back restored the previous key. The screen said "Not applied -- failed:
+# Radio: Could not apply ... Nothing was changed", which was true, and left the
+# two bench phones on different keys with no way to converge them.
+#
+# The tests below use an interface that EXISTS but cannot be written to, which
+# is the real state and the one the old `_lora_iface is None` guard missed --
+# the rest of this module runs with _lora_iface None, so none of it covered
+# this.
+# ---------------------------------------------------------------------------
+
+
+class PortNotOpenError(Exception):
+    """Named to match pyserial's, which is what rns_bridge._is_port_gone
+    matches on. rns_stub's `serial` has no exception hierarchy to inherit."""
+
+
+class _FakeRNode(object):
+    """Enough of RNS's RNodeInterface for set_radio_config's live path.
+
+    `online` and `serial.is_open` are the two independent things that decide
+    whether a write can land -- see rns_bridge._radio_port_live, and the
+    2026-11-10 bench note about a radio marked online over a closed port.
+    """
+
+    def __init__(self, online=True, port_open=True, fail_on_write=False):
+        self.online = online
+        self.reconnecting = False
+        self.detached = False
+        self.serial = type("_Port", (), {"is_open": port_open})()
+        self.fail_on_write = fail_on_write
+        self.frequency = 915000000
+        self.bandwidth = 125000
+        self.txpower = 22
+        self.sf = 8
+        self.cr = 5
+        self.bitrate = 1000
+        self.r_frequency = None
+        self.r_bandwidth = None
+        self.r_txpower = None
+        self.r_sf = None
+        self.r_cr = None
+        self.writes = []
+
+    def _write(self, what):
+        if self.fail_on_write:
+            raise PortNotOpenError("Attempting to use a port that is not open")
+        self.writes.append(what)
+
+    # The radio echoes each parameter straight back, so _await_radio_readback
+    # is satisfied without a real wait.
+    def setFrequency(self):
+        self._write("frequency")
+        self.r_frequency = self.frequency
+
+    def setBandwidth(self):
+        self._write("bandwidth")
+        self.r_bandwidth = self.bandwidth
+
+    def setTXPower(self):
+        self._write("txpower")
+        self.r_txpower = self.txpower
+
+    def setSpreadingFactor(self):
+        self._write("sf")
+        self.r_sf = self.sf
+
+    def setCodingRate(self):
+        self._write("cr")
+        self.r_cr = self.cr
+
+    def validateRadioState(self):
+        return True
+
+    def updateBitrate(self):
+        self.bitrate = 1200
+
+
+class NoRadioAttachedTest(_Fixture):
+
+    def use_radio(self, **kw):
+        iface = _FakeRNode(**kw)
+        rb._lora_iface = iface
+        return iface
+
+    # -- what set_radio_config itself answers ----------------------------
+
+    def test_a_live_radio_still_gets_the_settings_pushed(self):
+        # The control: without this, every assertion below could be passing
+        # because nothing is ever pushed to anything.
+        iface = self.use_radio()
+        self.assertEqual(rb.set_radio_config("Medium Slow", "906.875", 20), "")
+        self.assertEqual(iface.writes,
+                         ["frequency", "bandwidth", "txpower", "sf", "cr"])
+        self.assertEqual(iface.frequency, 906875000)
+
+    def test_an_offline_radio_saves_without_pushing(self):
+        iface = self.use_radio(online=False)
+        self.assertEqual(rb.set_radio_config("Medium Slow", "906.875", 20),
+                         rb.RADIO_SAVED_NO_RADIO)
+        self.assertEqual(iface.writes, [])
+        self.assertEqual(rb._load_radio_config()["frequency_hz"], 906875000)
+
+    def test_online_over_a_closed_port_saves_without_pushing(self):
+        # The state the port watchdog exists for, and the one that produced
+        # the Pixel's PortNotOpenError.
+        iface = self.use_radio(online=True, port_open=False)
+        self.assertEqual(rb.set_radio_config("Medium Slow", "906.875", 20),
+                         rb.RADIO_SAVED_NO_RADIO)
+        self.assertEqual(iface.writes, [])
+
+    def test_a_port_that_dies_mid_apply_is_saved_not_failed(self):
+        # online and open at the check, gone by the write: this link drops
+        # constantly over BLE, so the window is real.
+        self.use_radio(online=True, port_open=True, fail_on_write=True)
+        self.assertEqual(rb.set_radio_config("Medium Slow", "906.875", 20),
+                         rb.RADIO_SAVED_NO_RADIO)
+        self.assertEqual(rb._load_radio_config()["preset"], "Medium Slow")
+
+    def test_the_settings_are_left_on_the_interface_for_the_reconnect(self):
+        # RNS's reconnect_port -> configure_device -> initRadio sends these
+        # five attributes, so a radio connecting later comes up on the new
+        # settings. This is what makes RADIO_SAVED_NO_RADIO's wording true
+        # rather than a hopeful guess.
+        iface = self.use_radio(online=False)
+        rb.set_radio_config("Medium Slow", "906.875", 20)
+        self.assertEqual(iface.frequency, 906875000)
+        self.assertEqual(iface.txpower, 20)
+        sf, bw, cr = __import__("radio").preset_params("Medium Slow")
+        self.assertEqual((iface.sf, iface.bandwidth, iface.cr), (sf, bw, cr))
+
+    def test_a_radio_that_refuses_the_settings_is_still_a_failure(self):
+        # The fix must not swallow a real refusal: that is a different fault
+        # and the operator has to hear about it.
+        iface = self.use_radio()
+        iface.validateRadioState = lambda: False
+        problem = rb.set_radio_config("Medium Slow", "906.875", 20)
+        self.assertNotEqual(problem, rb.RADIO_SAVED_NO_RADIO)
+        self.assertIn("did not accept", problem)
+
+    def test_a_radio_that_never_confirms_is_not_saved_no_radio(self):
+        # Distinct from "no radio": here the KISS commands DID go out and are
+        # not rolled back, so the radio may well be on the new settings. The
+        # operator has to be told the confirmation never arrived -- calling it
+        # "saved, will be sent later" would describe the opposite situation.
+        # Patched rather than waited out: the real readback allows 8 s.
+        self.use_radio()
+        saved = rb._await_radio_readback
+        rb._await_radio_readback = lambda iface, **kw: False
+        try:
+            problem = rb.set_radio_config("Medium Slow", "906.875", 20)
+        finally:
+            rb._await_radio_readback = saved
+        self.assertNotEqual(problem, rb.RADIO_SAVED_NO_RADIO)
+        self.assertIn("did not confirm", problem)
+
+    def test_a_radio_that_never_confirms_still_fails_the_bundle(self):
+        self.use_radio()
+        saved = rb._await_radio_readback
+        rb._await_radio_readback = lambda iface, **kw: False
+        try:
+            problems = sl._apply({"lora_preset": "Medium Slow",
+                                  "lora_freq_mhz": "906.875",
+                                  "lora_tx_dbm": 20})
+        finally:
+            rb._await_radio_readback = saved
+        self.assertEqual(len(problems), 1)
+
+    def test_an_unrelated_failure_is_still_a_failure(self):
+        iface = self.use_radio()
+        def boom():
+            raise ValueError("something else entirely")
+        iface.setFrequency = boom
+        problem = rb.set_radio_config("Medium Slow", "906.875", 20)
+        self.assertNotEqual(problem, rb.RADIO_SAVED_NO_RADIO)
+        self.assertIn("Could not apply", problem)
+
+    def test_an_invalid_setting_is_refused_before_any_of_this(self):
+        self.use_radio(online=False)
+        self.assertNotEqual(rb.set_radio_config("Medium Slow", "not a number", 20),
+                            rb.RADIO_SAVED_NO_RADIO)
+
+    # -- what the bundle does with it ------------------------------------
+
+    def test_the_passphrase_lands_with_no_radio_connected(self):
+        # THE ONE THAT MATTERS: the whole point of the fix.
+        #
+        # The team QR is built first, with the fixture's _lora_iface still
+        # None, because _share_team_settings asserts a clean apply while it
+        # poses as the host phone. The radio goes missing only for THIS phone,
+        # at the moment the bundle arrives -- which is the situation.
+        self._j(sl.set_pin(PIN))
+        qr = self._share_team_settings()
+        self.use_radio(online=False)
+        offer = self._j(sl.receive(qr["text"], "qr", KOTLIN))
+        out = self._j(sl.approve(offer["host"], PIN, False, KOTLIN))
+        self.assertEqual(out["outcome"], "applied")
+        self.assertEqual(rb._load_passphrase()[0], "team pass")
+        # And the radio settings are saved for whenever a radio turns up.
+        cfg = rb._load_radio_config()
+        self.assertEqual((cfg["preset"], cfg["frequency_hz"]),
+                         ("Medium Slow", 906875000))
+        # Coverage too -- it was rolled back with everything else before.
+        self.assertEqual(out["coverage"]["fm_mhz"], "446.000")
+
+    def test_the_apply_reports_no_problem_for_a_missing_radio(self):
+        self.use_radio(online=False)
+        self.assertEqual(sl._apply({"lora_preset": "Medium Slow",
+                                    "lora_freq_mhz": "906.875",
+                                    "lora_tx_dbm": 20}), [])
+
+    def test_a_real_radio_problem_still_fails_the_bundle(self):
+        iface = self.use_radio()
+        iface.validateRadioState = lambda: False
+        problems = sl._apply({"lora_preset": "Medium Slow",
+                              "lora_freq_mhz": "906.875",
+                              "lora_tx_dbm": 20})
+        self.assertEqual(len(problems), 1)
+        self.assertTrue(problems[0].startswith("Radio: "))
+
+    def test_undo_works_with_no_radio_connected_too(self):
+        self._j(sl.set_pin(PIN))
+        qr = self._share_team_settings()
+        self.use_radio(online=False)
+        offer = self._j(sl.receive(qr["text"], "qr", KOTLIN))
+        out = self._j(sl.approve(offer["host"], PIN, False, KOTLIN))
+        self.assertEqual(out["outcome"], "applied")
+        back = self._j(sl.undo(json.dumps({"coverage": out["coverage"]})))
+        self.assertEqual(back["problems"], [])
+        self.assertEqual(rb._load_passphrase()[0], "old pass")
+        self.assertEqual(rb._load_radio_config()["preset"], "Short Slow")

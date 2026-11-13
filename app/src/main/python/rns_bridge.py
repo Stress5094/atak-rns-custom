@@ -31,6 +31,7 @@ import math
 import os
 import queue
 import random
+import shutil
 import signal
 import socket
 import struct
@@ -1235,6 +1236,18 @@ _NODE_ID_WAS_FRESH = _node_id_fresh
 _COT_DUMP_PATH = os.path.expanduser("~/.atakrns_cot_dump")
 _COT_DUMP_MAX_B = 2_000_000
 _cot_dump_lock = threading.Lock()
+
+# The FM receive dump, written by KOTLIN (FmAudioBridgeService) into the same
+# directory Chaquopy gives Python as HOME, while the marker file beside it
+# exists. Named here only so the wipe can delete it and the wipe-inventory
+# test can see it: nothing on the Python side reads or writes either file.
+#
+# It is raw received audio -- on 2026-11-12 a phone was carrying 519 KB of it
+# from three weeks earlier. Debug-only, like the CoT dump above, and wiped for
+# the same reason: what a lost phone is carrying is not a question of how the
+# file got there.
+_FM_RX_DUMP_PATH = os.path.expanduser("~/fm_rx_dump.raw")
+_FM_RX_DUMP_MARKER_PATH = os.path.expanduser("~/fm_rx_dump_on")
 
 
 def _cot_dump(direction, xml):
@@ -3528,10 +3541,13 @@ def _note_peer_frame(sender, rssi, snr, seq, direct=True, hops_away=None,
     # range the extra samples are exactly where the answer is. Relayed frames
     # are excluded because their signal describes the relay, not the sender --
     # the same distinction peers.py draws for the same reason.
-    # The wall-clock of the most recent peer sighting, for the silence
-    # auto-erase timer (see wipe_tick). Every authenticated frame updates it.
-    global _wipe_last_heard
+    # The most recent peer sighting, for the silence auto-erase timer (see
+    # wipe_tick). Every authenticated frame updates it. Two clocks: the wall
+    # one is what the screen shows, the monotonic one is what the timer
+    # measures, because the phone's date can be changed and that one cannot.
+    global _wipe_last_heard, _wipe_heard_mono
     _wipe_last_heard = time.time()
+    _wipe_heard_mono = _wipe_mono()
 
     if direct:
         _record_range_sample(sender, rssi, snr, seq, link)
@@ -5894,6 +5910,55 @@ def coverage_radio():
         return json.dumps({"error": "%s: %s" % (type(e).__name__, e)})
 
 
+def _is_port_gone(exc):
+    """Whether `exc` means "the serial port is not there", as opposed to the
+    radio refusing a setting.
+
+    Matched on class NAME up the inheritance chain rather than by importing
+    pyserial's exceptions: this module is imported on the desktop against
+    rns_stub, where `serial` is a stub and `serial.PortNotOpenError` need not
+    exist. pyserial's own hierarchy is
+    PortNotOpenError -> SerialException -> IOError(OSError), so the names are
+    the stable part.
+    """
+    names = {cls.__name__ for cls in type(exc).__mro__}
+    return bool(names & {"PortNotOpenError", "SerialException",
+                         "SerialTimeoutException"})
+
+
+def _radio_port_live(iface):
+    """Whether radio settings can be pushed to `iface` right NOW.
+
+    Both halves matter, and the second is why checking `_lora_iface is None`
+    was not enough. `online` False is a radio that is not up -- never
+    connected, or dropped and reconnecting. `online` True over a closed serial
+    port is the stuck state _rnode_stuck describes and the 2026-11-10 bench
+    measured; every write in that state raises PortNotOpenError.
+    """
+    if not getattr(iface, "online", False):
+        return False
+    port = getattr(iface, "serial", None)
+    return port is not None and getattr(port, "is_open", False)
+
+
+# set_radio_config's answer when the settings were saved and recorded on the
+# interface, but there is no reachable radio to push them to.
+#
+# NOT a problem string: settings_link._apply compares against this exactly, so
+# a shared bundle carrying radio settings still applies its other groups -- the
+# passphrase above all, which needs no radio whatsoever. Before 2026-11-12 a
+# phone with no radio connected failed the whole bundle on this one group and
+# rolled back the passphrase with it, which is to say the team key could not be
+# distributed to the phone that had not got it. Measured on the Pixel that day:
+# two bundles applied a new key, failed here, and put the old key back.
+#
+# It is still returned rather than swallowed, because the manual radio screen
+# shows it verbatim in a toast and "saved but not sent" is exactly what the
+# operator needs to know there.
+RADIO_SAVED_NO_RADIO = ("Saved. No radio is connected, so these settings will "
+                        "be sent to it when one is.")
+
+
 def set_radio_config(preset, frequency_mhz, txpower_dbm):
     """Change the radio settings. Returns "" on success, else why not.
 
@@ -5951,13 +6016,27 @@ def set_radio_config(preset, frequency_mhz, txpower_dbm):
         return "A survey is running -- stop it first"
 
     sf, bandwidth, coding_rate = radio.preset_params(preset)
-    try:
-        iface.frequency = frequency_hz
-        iface.bandwidth = bandwidth
-        iface.txpower = int(txpower_dbm)
-        iface.sf = sf
-        iface.cr = coding_rate
 
+    # Recorded on the interface whether or not the radio can be reached. RNS's
+    # own reconnect path (reconnect_port -> configure_device -> initRadio)
+    # sends setFrequency/setBandwidth/setTXPower/setSpreadingFactor/
+    # setCodingRate straight off these attributes, so a radio that turns up
+    # later comes up on the new settings with nobody re-applying them. That is
+    # what makes RADIO_SAVED_NO_RADIO's promise true rather than hopeful.
+    iface.frequency = frequency_hz
+    iface.bandwidth = bandwidth
+    iface.txpower = int(txpower_dbm)
+    iface.sf = sf
+    iface.cr = coding_rate
+
+    if not _radio_port_live(iface):
+        RNS.log("[cot-bridge] radio settings saved but not sent: no reachable "
+                "radio (%s)" % radio.describe(preset, frequency_hz,
+                                              int(txpower_dbm)),
+                RNS.LOG_NOTICE)
+        return RADIO_SAVED_NO_RADIO
+
+    try:
         # Blanked so the wait below cannot be satisfied by the values the radio
         # reported for the PREVIOUS settings, which on a no-op change would
         # match immediately and prove nothing.
@@ -6016,6 +6095,16 @@ def set_radio_config(preset, frequency_mhz, txpower_dbm):
         iface.updateBitrate()
         _resize_reassembly(iface)
     except Exception as e:
+        # A port that went away mid-apply is the same situation the pre-check
+        # catches, half a second later: this link drops constantly over BLE
+        # (measured 40 ms after a reconnect on 2026-11-10), so the window
+        # between the check and these writes is real and gets hit. Reported as
+        # "saved, not sent" rather than as a failure, or a bundle would still
+        # roll a perfectly good passphrase back on an unlucky interleaving.
+        if _is_port_gone(e):
+            RNS.log("[cot-bridge] radio settings saved but not sent: the port "
+                    "closed mid-apply (%r)" % (e,), RNS.LOG_NOTICE)
+            return RADIO_SAVED_NO_RADIO
         # Logged as well as returned. Returning it only to the caller puts the
         # reason in a toast that is gone in three seconds and in no file at
         # all -- which is how this branch swallowed a real failure during the
@@ -6764,10 +6853,111 @@ def set_fm_clear(enabled):
 # _erase_all_settings() removes the passphrase, the node id, the radio config,
 # the epoch counter and every settings-sharing file (PIN, trusted hosts, host
 # key) and resets the in-memory state, so nothing of the group survives.
+#
+# WHY THE TIMERS COUNT ELAPSED SECONDS AND NOT DEADLINES (fixed 2026-11-12).
+# The first version stored a wall-clock stamp (`deadman_armed_at`) and fired
+# once time.time() passed stamp + duration. Whoever is holding a phone they
+# should not have can open Settings and set the date back a year, and that
+# postponed the wipe by a year -- defeating the one feature whose entire
+# purpose is to work in exactly that situation. It also cut the other way: a
+# timezone or NTP correction jumping the clock forward could erase a working
+# phone's keys early.
+#
+# So each timer now accumulates ELAPSED seconds in the policy file and fires
+# when the total reaches the duration. Every tick charges the timers
+#
+#     max(monotonic delta, wall-clock delta)
+#
+# which is deliberately the larger of the two:
+#
+#   * the monotonic reading is CLOCK_BOOTTIME where it exists (counts suspend,
+#     which plain CLOCK_MONOTONIC does not -- an Android phone spends most of
+#     its life suspended) and no setting on the phone can move it, so setting
+#     the date back now buys nothing;
+#   * the wall-clock delta is what covers the gaps monotonic cannot see at all
+#     -- the process restarting, and the phone being switched off between
+#     ticks, since BOOTTIME restarts from zero at boot. Without it, powering
+#     the phone down would pause the countdown indefinitely;
+#   * and taking the MAX means every disagreement resolves towards erasing
+#     sooner. For a feature that destroys keys on a phone presumed lost, early
+#     is the safe direction and late is the dangerous one.
+#
+# What an adversary can still do is stop the bridge from running at all (the
+# tick lives in PythonRnsService's settings thread, which only starts after
+# rns_bridge.start() returns). Nothing inside Python can close that, and while
+# the process is stopped the app is not handing out anything either.
+#
+# A policy file written by the pre-fix build has no elapsed counters, so its
+# timers start counting from the first tick after the upgrade -- a one-off
+# restart of the countdown. Both bench phones had auto-erase off when this
+# landed, so there is nothing in the field to migrate.
 # ---------------------------------------------------------------------------
 
 _WIPE_PATH = os.path.expanduser("~/.atakrns_wipe")
+
+# Wall clock of the most recent peer sighting. Informational only: it is what
+# the Advanced tab shows, and nothing decides a wipe from it.
 _wipe_last_heard = 0.0
+
+# The monotonic reading at the previous tick, and at the most recent peer
+# sighting. Both are in-process only -- a monotonic clock means nothing to the
+# next process, which is why the POLICY FILE carries elapsed seconds instead.
+_wipe_mono_last = None
+_wipe_heard_mono = None
+
+
+def _wipe_mono():
+    """A clock the phone's date setting cannot move.
+
+    CLOCK_BOOTTIME keeps counting across suspend, which matters here because a
+    phone sitting in a drawer is suspended almost all of the time and
+    CLOCK_MONOTONIC stops dead for the duration. Falls back to time.monotonic()
+    where BOOTTIME is missing; the wall-clock term in _wipe_charge() is what
+    covers whatever either of them fails to see.
+    """
+    try:
+        return time.clock_gettime(time.CLOCK_BOOTTIME)
+    except (AttributeError, OSError, ValueError):
+        pass
+    try:
+        return time.monotonic()
+    except Exception:
+        return 0.0
+
+
+def _wipe_charge(policy, now_wall, commit=True):
+    """Seconds to add to the timers for the stretch since the previous tick,
+    and the monotonic reading taken while working it out.
+
+    `commit` is False for the status screen, which reads the countdown on every
+    status refresh and must not consume the interval the next real tick needs
+    to charge.
+    """
+    global _wipe_mono_last
+    mono = _wipe_mono()
+    mono_delta = 0.0
+    if _wipe_mono_last is not None and mono > _wipe_mono_last:
+        mono_delta = mono - _wipe_mono_last
+    if commit:
+        _wipe_mono_last = mono
+    # Only a FORWARD wall-clock move counts. A backward one means the date was
+    # changed (or corrected) under us, and the monotonic term carries the
+    # interval instead.
+    wall_delta = 0.0
+    try:
+        last_tick = float(policy.get("last_tick_at") or 0)
+    except (TypeError, ValueError):
+        last_tick = 0.0
+    if last_tick and now_wall > last_tick:
+        wall_delta = now_wall - last_tick
+    return max(mono_delta, wall_delta), mono
+
+
+def _wipe_elapsed(policy, key):
+    try:
+        return max(0.0, float(policy.get(key) or 0))
+    except (TypeError, ValueError):
+        return 0.0
 
 _WIPE_FILES = (
     _MESH_PASSPHRASE_PATH,
@@ -6778,6 +6968,15 @@ _WIPE_FILES = (
     os.path.expanduser("~/.atakrns_host_key.json"),
     os.path.expanduser("~/.atakrns_host_rev.json"),
     os.path.expanduser("~/.atakrns_settings_net.json"),
+    # Bench fixtures, wiped since 2026-11-12. All four are debug-only and
+    # normally absent, but "normally absent" is not a property of the phone
+    # somebody lost: the CoT dump is up to 2 MB of plaintext positions,
+    # callsigns and ATAK uids, and the FM dump is raw received audio.
+    _COT_DUMP_PATH,
+    _DEAF_TO_PATH,
+    _FM_RX_DUMP_PATH,
+    _FM_RX_DUMP_MARKER_PATH,
+    # Last on purpose -- see test_the_policy_file_is_wiped_last.
     _WIPE_PATH,
 )
 
@@ -6804,7 +7003,15 @@ def _save_wipe_policy(policy):
 
 
 def get_wipe_policy():
-    """The auto-erase policy, for the Advanced tab. Never raises."""
+    """The auto-erase policy, for the Advanced tab. Never raises.
+
+    `*_armed_at` and `last_heard_at` are wall-clock stamps kept for the screen
+    and for reading a policy file by hand; the decision is made from the
+    `*_elapsed_s` counters, which no clock change can move.
+    """
+    empty = {"deadman_s": 0, "deadman_armed_at": 0, "silence_s": 0,
+             "silence_armed_at": 0, "last_heard_at": 0,
+             "deadman_elapsed_s": 0, "silence_elapsed_s": 0}
     try:
         p = _wipe_policy()
         return json.dumps({
@@ -6813,16 +7020,18 @@ def get_wipe_policy():
             "silence_s": int(p.get("silence_s") or 0),
             "silence_armed_at": int(p.get("silence_armed_at") or 0),
             "last_heard_at": int(p.get("last_heard_at") or 0),
+            "deadman_elapsed_s": int(_wipe_elapsed(p, "deadman_elapsed_s")),
+            "silence_elapsed_s": int(_wipe_elapsed(p, "silence_elapsed_s")),
         })
     except Exception:
-        return json.dumps({"deadman_s": 0, "deadman_armed_at": 0, "silence_s": 0,
-                           "silence_armed_at": 0, "last_heard_at": 0})
+        return json.dumps(empty)
 
 
 def set_wipe_policy(deadman_s, silence_s):
     """Arm or disarm the auto-erase timers. Both arguments are durations in
     seconds; 0 disables that timer. Arming restarts that timer's clock. Never
     raises."""
+    global _wipe_heard_mono, _wipe_mono_last
     try:
         deadman_s = max(0, int(deadman_s or 0))
         silence_s = max(0, int(silence_s or 0))
@@ -6833,6 +7042,17 @@ def set_wipe_policy(deadman_s, silence_s):
         p["deadman_armed_at"] = now if deadman_s else 0
         p["silence_armed_at"] = now if silence_s else 0
         p["last_heard_at"] = now if silence_s else 0
+        # Both countdowns start here. Charging begins at the next tick, so the
+        # interval between this call and that tick is the one stretch no timer
+        # is charged for -- bounded by SETTINGS_TICK_MS, and in the safe
+        # direction only for as long as one tick.
+        p["deadman_elapsed_s"] = 0
+        p["silence_elapsed_s"] = 0
+        p["last_tick_at"] = now
+        _wipe_mono_last = _wipe_mono()
+        # Arming counts as having just heard someone: the silence window runs
+        # from when the operator set it, not from an older sighting.
+        _wipe_heard_mono = _wipe_mono_last if silence_s else None
         _save_wipe_policy(p)
         RNS.log("[cot-bridge] auto-erase: %ds deadman, %ds silence"
                 % (deadman_s, silence_s), RNS.LOG_NOTICE)
@@ -6846,23 +7066,40 @@ def wipe_tick():
 
     Called from the service's settings tick (every ~10 s). Returns
     {"erased": true} when a wipe just happened, so Kotlin can clear its own
-    preferences and stop. Never raises."""
+    preferences and stop. Never raises.
+
+    Each armed timer is charged the interval since the previous tick and fires
+    once its total reaches the duration -- see the section header for why this
+    counts elapsed seconds rather than watching for a wall-clock deadline.
+    """
     try:
         p = _wipe_policy()
         now = time.time()
         heard = _wipe_last_heard
         if heard and int(p.get("last_heard_at") or 0) < heard:
             p["last_heard_at"] = int(heard)
+        charge, mono = _wipe_charge(p, now)
+        p["last_tick_at"] = int(now)
         deadman_s = int(p.get("deadman_s") or 0)
         silence_s = int(p.get("silence_s") or 0)
         due = False
         if deadman_s:
-            armed = int(p.get("deadman_armed_at") or 0)
-            if armed and now >= armed + deadman_s:
+            elapsed = _wipe_elapsed(p, "deadman_elapsed_s") + charge
+            p["deadman_elapsed_s"] = int(elapsed)
+            if elapsed >= deadman_s:
                 due = True
-        if silence_s and not due:
-            last = int(p.get("last_heard_at") or 0)
-            if last and now - last >= silence_s:
+        if silence_s:
+            if _wipe_heard_mono is not None:
+                # A peer has been heard in this process, so the window is
+                # measured straight off that sighting -- exact, and with no
+                # dependence on the wall clock either end.
+                elapsed = max(0.0, mono - _wipe_heard_mono)
+            else:
+                # Nothing heard since this process started: carry on from
+                # whatever the last process wrote down.
+                elapsed = _wipe_elapsed(p, "silence_elapsed_s") + charge
+            p["silence_elapsed_s"] = int(elapsed)
+            if elapsed >= silence_s:
                 due = True
         if not due:
             _save_wipe_policy(p)
@@ -6881,11 +7118,28 @@ def erase_all_settings():
 
 def _erase_all_settings():
     global _mesh, _mesh_passphrase, _NODE_ID, _radio_config, _fingerprint_cache
+    global _wipe_last_heard, _wipe_heard_mono, _wipe_mono_last
+    # The policy file goes with everything else, so the timers are disarmed by
+    # the wipe itself. Dropping the in-memory readings with it keeps a stale
+    # sighting from a wiped group out of whatever is armed next.
+    _wipe_last_heard = 0.0
+    _wipe_heard_mono = None
+    _wipe_mono_last = None
     for path in _WIPE_FILES:
         try:
             os.remove(path)
         except OSError:
             pass
+    # Reticulum's own directory, and the reason it is a directory rather than
+    # one more entry in the list above: it holds the persistent Transport
+    # Identity, a long-term PRIVATE KEY that is loaded at every start. A phone
+    # that erased its group key but kept this is still carrying a cryptographic
+    # identity it can be recognised by. _ensure_reticulum_config() rebuilds the
+    # directory on the next start, and a fresh identity comes with it.
+    try:
+        shutil.rmtree(RNS_CONFIG_DIR, ignore_errors=True)
+    except Exception:
+        pass
     _mesh_passphrase = ""
     _mesh = None
     _fingerprint_cache = None
@@ -6905,24 +7159,29 @@ def _erase_all_settings():
 
 def _wipe_status():
     """Time left until each auto-erase timer fires, for the status screen.
-    None means that timer is off. Uses the freshest last-heard (in memory, or
-    what wipe_tick last persisted)."""
+    None means that timer is off.
+
+    Read-only: it charges nothing, so refreshing the status screen cannot eat
+    an interval that wipe_tick has not counted yet, and cannot bring a wipe
+    forward or push it back.
+    """
     try:
         p = _wipe_policy()
         now = time.time()
+        charge, mono = _wipe_charge(p, now, commit=False)
         deadman_in = None
         silence_in = None
         deadman_s = int(p.get("deadman_s") or 0)
         if deadman_s:
-            armed = int(p.get("deadman_armed_at") or 0)
-            if armed:
-                deadman_in = max(0, int(armed + deadman_s - now))
+            elapsed = _wipe_elapsed(p, "deadman_elapsed_s") + charge
+            deadman_in = max(0, int(deadman_s - elapsed))
         silence_s = int(p.get("silence_s") or 0)
         if silence_s:
-            heard = int(_wipe_last_heard) if _wipe_last_heard else 0
-            last = max(int(p.get("last_heard_at") or 0), heard)
-            if last:
-                silence_in = max(0, int(last + silence_s - now))
+            if _wipe_heard_mono is not None:
+                elapsed = max(0.0, mono - _wipe_heard_mono)
+            else:
+                elapsed = _wipe_elapsed(p, "silence_elapsed_s") + charge
+            silence_in = max(0, int(silence_s - elapsed))
         return {"deadman_in_s": deadman_in, "silence_in_s": silence_in}
     except Exception:
         return {"deadman_in_s": None, "silence_in_s": None}

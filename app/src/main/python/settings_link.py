@@ -204,7 +204,15 @@ def _apply(settings):
         # A pushed power is a REQUEST: this radio may top out lower.
         power = min(power, rb._txpower_max_dbm())
         problem = rb.set_radio_config(preset, freq, power)
-        if problem:
+        # "Saved, but there is no radio to send it to" is NOT a problem here.
+        # Every group in this function is applied whole or not at all, and
+        # Receiver._apply_offer puts the WHOLE bundle back if any group
+        # reports one -- so counting a missing radio as a failure meant a
+        # phone with no radio connected could not be given the group
+        # passphrase, which needs no radio at all. Seen on the Pixel
+        # 2026-11-12: two bundles applied a new key, this group raised
+        # PortNotOpenError, and the old key went back on.
+        if problem and problem != rb.RADIO_SAVED_NO_RADIO:
             problems.append("Radio: " + problem)
     if "passphrase" in settings:
         if not rb.set_mesh_passphrase(settings["passphrase"]):
