@@ -16,6 +16,7 @@ import json
 import math
 import os
 import inspect
+import shutil
 import struct
 import sys
 import time
@@ -4307,3 +4308,905 @@ class TestPassphraseStrength(unittest.TestCase):
     def test_it_never_raises(self):
         for bad in (None, "", "\u2603" * 5, 12):
             self.assertIn("weak", json.loads(rns_bridge.passphrase_strength(bad)))
+
+
+# ---------------------------------------------------------------------------
+# AUTO-ERASE (added 2026-11-12, against 93160ab/df699f1, which shipped with no
+# tests at all; extended the same day when the timers moved off the wall
+# clock).
+#
+# This is the only feature in the app whose job is to DESTROY data, and every
+# failure in it is silent in one direction or the other:
+#
+#   * os.remove failures are swallowed on purpose (a wipe must not stop
+#     half-way), so a path that is wrong, renamed or simply absent from
+#     _WIPE_FILES leaves that secret on the phone and logs nothing;
+#   * wipe_tick() answers {"erased": false} on ANY exception, so a policy file
+#     the parser trips over reads exactly like "nothing is due" -- the feature
+#     is then off on a phone whose operator believes it is armed;
+#   * and in the other direction a timer that fires early eats the group's
+#     keys on a phone that was never lost.
+#
+# So these lean on three things rather than the happy path: that nothing is
+# erased unless it was asked for, that everything is erased when it was, and
+# that the file list is an ENFORCED INVENTORY rather than a hand-copied one
+# (TestTheWipeListIsAnEnforcedInventory).
+#
+# EVERY TIMER TEST RUNS ON A FAKE CLOCK, and the fake drives the wall clock
+# and the monotonic clock SEPARATELY. That is not tidiness: the whole point of
+# the 2026-11-12 fix is that those two can disagree, so a fake that moved them
+# together could not tell the fixed code from the broken code.
+# ---------------------------------------------------------------------------
+
+
+class _FakeClock(object):
+    """The real time module with both of its clocks under the test's control.
+
+    `wall` is what time.time() returns -- the one a phone's owner, or whoever
+    is holding a phone they should not have, can change in Settings. `mono` is
+    what CLOCK_BOOTTIME returns, which they cannot. Tests move them together
+    for ordinary time passing and apart to model a clock change.
+
+    Anything else rns_bridge asks of the time module is delegated, because the
+    rest of the bridge keeps running while a test holds this in place.
+    """
+
+    # A real-looking CLOCK_BOOTTIME constant: defined on the class so
+    # rns_bridge's time.CLOCK_BOOTTIME lookup does not fall through to the
+    # real module and then read the real clock.
+    CLOCK_BOOTTIME = 7
+
+    def __init__(self, wall=1_700_000_000, mono=10_000.0):
+        self.wall = float(wall)
+        self.mono = float(mono)
+
+    # -- the two clocks ---------------------------------------------------
+
+    def time(self):
+        return self.wall
+
+    def monotonic(self):
+        return self.mono
+
+    def clock_gettime(self, which):
+        if which == self.CLOCK_BOOTTIME:
+            return self.mono
+        raise ValueError("unexpected clock %r" % (which,))
+
+    def __getattr__(self, name):
+        return getattr(time, name)
+
+    # -- what tests do to them -------------------------------------------
+
+    def pass_time(self, seconds):
+        """Ordinary time passing: both clocks advance together."""
+        self.wall += seconds
+        self.mono += seconds
+
+    def set_date_back(self, seconds):
+        """Someone changed the phone's date. Only the wall clock moves."""
+        self.wall -= seconds
+
+    def set_date_forward(self, seconds):
+        self.wall += seconds
+
+    def power_off_for(self, seconds):
+        """Off between ticks: wall time passed, and BOOTTIME restarted from
+        zero at the next boot, which is lower than it was before."""
+        self.wall += seconds
+        self.mono = 50.0
+
+
+class _AutoEraseBase(unittest.TestCase):
+    """Redirects every path the wipe touches into a temp directory, and puts
+    both clocks under the test's control.
+
+    Nothing here may be allowed to run against the real home directory: the
+    code under test deletes the passphrase, the node id and the nonce counter,
+    and it does so with failures swallowed -- so a test that forgot to redirect
+    one path would quietly wipe the developer's own install, and pass.
+    """
+
+    # Written into every fake secret, so a survivor is identifiable by content
+    # and not merely by the file existing.
+    SECRET = "SECRET-MUST-NOT-SURVIVE"
+
+    def setUp(self):
+        import tempfile
+        self.dir = tempfile.mkdtemp()
+        self.saved = {
+            name: getattr(rns_bridge, name) for name in (
+                "_WIPE_PATH", "_WIPE_FILES", "_wipe_last_heard",
+                "_wipe_mono_last", "_wipe_heard_mono", "_mesh",
+                "_mesh_passphrase", "_NODE_ID", "_radio_config",
+                "_fingerprint_cache", "time")
+        }
+        rns_bridge._WIPE_PATH = os.path.join(self.dir, "wipe")
+        # The same shape as production: the secrets first, the policy file
+        # last. The names mirror the real ones so a failure message reads the
+        # way the device's files do.
+        self.secret_paths = tuple(
+            os.path.join(self.dir, name) for name in (
+                "passphrase", "node_id", "radio", "mesh_epoch",
+                "settings_share.json", "host_key.json", "host_rev.json",
+                "settings_net.json"))
+        rns_bridge._WIPE_FILES = self.secret_paths + (rns_bridge._WIPE_PATH,)
+        rns_bridge._wipe_last_heard = 0.0
+        rns_bridge._wipe_mono_last = None
+        rns_bridge._wipe_heard_mono = None
+        self.clock = _FakeClock()
+        rns_bridge.time = self.clock
+
+    def tearDown(self):
+        import shutil
+        for name, value in self.saved.items():
+            setattr(rns_bridge, name, value)
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    # -- helpers ----------------------------------------------------------
+
+    def write_secrets(self):
+        for path in self.secret_paths:
+            with open(path, "w") as f:
+                f.write(self.SECRET)
+
+    def survivors(self):
+        """Which secret files are still on disk, by basename."""
+        return sorted(os.path.basename(p) for p in self.secret_paths
+                      if os.path.exists(p))
+
+    def all_present(self):
+        return len(self.survivors()) == len(self.secret_paths)
+
+    def write_policy(self, **fields):
+        with open(rns_bridge._WIPE_PATH, "w") as f:
+            json.dump(fields, f)
+
+    def write_raw_policy(self, text):
+        with open(rns_bridge._WIPE_PATH, "w") as f:
+            f.write(text)
+
+    def on_disk(self):
+        with open(rns_bridge._WIPE_PATH) as f:
+            return json.load(f)
+
+    def tick(self):
+        return json.loads(rns_bridge.wipe_tick())
+
+    def policy(self):
+        return json.loads(rns_bridge.get_wipe_policy())
+
+    def hear_a_peer(self):
+        self.addCleanup(rns_bridge._peers.clear)
+        rns_bridge._note_peer_frame("aabbcc", None, None, 1, direct=False)
+
+    def restart_the_process(self):
+        """Everything in memory goes, the policy file stays -- and BOOTTIME
+        keeps running, because the phone did not reboot."""
+        rns_bridge._wipe_mono_last = None
+        rns_bridge._wipe_heard_mono = None
+        rns_bridge._wipe_last_heard = 0.0
+
+
+class TestAutoEraseIsOffUntilItIsAskedFor(_AutoEraseBase):
+    """The default, and the direction that matters most: an operator who never
+    opens the Advanced tab must not lose their keys. wipe_tick() runs every
+    ~10 s for the life of the process (PythonRnsService's settings tick), so
+    "does nothing" has to hold thousands of times over, not once."""
+
+    def test_with_no_policy_file_nothing_is_ever_erased(self):
+        self.write_secrets()
+        for _ in range(200):
+            self.clock.pass_time(10)
+            self.assertEqual(self.tick(), {"erased": False})
+        self.assertTrue(self.all_present())
+
+    def test_not_even_after_a_year_of_ticks(self):
+        self.write_secrets()
+        for _ in range(50):
+            self.clock.pass_time(7 * 86400)
+            self.assertEqual(self.tick(), {"erased": False})
+        self.assertTrue(self.all_present())
+
+    def test_with_no_policy_file_every_timer_reads_off(self):
+        got = self.policy()
+        self.assertEqual(got["deadman_s"], 0)
+        self.assertEqual(got["silence_s"], 0)
+        self.assertEqual(rns_bridge._wipe_status(),
+                         {"deadman_in_s": None, "silence_in_s": None})
+
+    def test_a_policy_file_of_junk_erases_nothing(self):
+        self.write_secrets()
+        for junk in ("", "not json at all", "{", "\x00\x01", "null"):
+            self.write_raw_policy(junk)
+            self.clock.pass_time(86400)
+            self.assertEqual(self.tick(), {"erased": False},
+                             "erased on policy %r" % (junk,))
+        self.assertTrue(self.all_present())
+
+    def test_a_policy_that_is_a_list_erases_nothing(self):
+        # json.load succeeds and returns a list; _wipe_policy's isinstance
+        # check is what stops .get() from raising further down.
+        self.write_secrets()
+        self.write_raw_policy('[3600, 3600]')
+        self.clock.pass_time(86400)
+        self.assertEqual(self.tick(), {"erased": False})
+        self.assertTrue(self.all_present())
+
+    def test_a_policy_with_unparsable_durations_erases_nothing(self):
+        self.write_secrets()
+        for bad in ("abc", [], {}, "1e9999"):
+            self.write_policy(deadman_s=bad, silence_s=bad,
+                              deadman_elapsed_s=99999, silence_elapsed_s=99999)
+            self.clock.pass_time(86400)
+            self.assertEqual(self.tick(), {"erased": False},
+                             "erased on duration %r" % (bad,))
+        self.assertTrue(self.all_present())
+
+    def test_an_elapsed_counter_alone_does_not_fire_anything(self):
+        # A duration of 0 is off, whatever has been counted against it.
+        self.write_secrets()
+        self.write_policy(deadman_s=0, silence_s=0,
+                          deadman_elapsed_s=10 ** 9,
+                          silence_elapsed_s=10 ** 9)
+        self.clock.pass_time(86400)
+        self.assertEqual(self.tick(), {"erased": False})
+        self.assertTrue(self.all_present())
+
+
+class TestArmingAndDisarming(_AutoEraseBase):
+
+    def test_arming_round_trips_through_the_file(self):
+        rns_bridge.set_wipe_policy(3600, 1800)
+        got = self.policy()
+        self.assertEqual(got["deadman_s"], 3600)
+        self.assertEqual(got["silence_s"], 1800)
+
+    def test_arming_starts_both_counters_at_zero(self):
+        self.write_policy(deadman_elapsed_s=5000, silence_elapsed_s=5000)
+        rns_bridge.set_wipe_policy(3600, 1800)
+        got = self.policy()
+        self.assertEqual(got["deadman_elapsed_s"], 0)
+        self.assertEqual(got["silence_elapsed_s"], 0)
+
+    def test_it_takes_the_strings_kotlin_actually_sends(self):
+        # MainActivity calls callPython("set_wipe_policy", deadmanS.toString(),
+        # silenceS.toString()) -- every argument arrives as a string, so a
+        # version of this that only accepted ints would pass here and do
+        # nothing on the phone.
+        got = json.loads(rns_bridge.set_wipe_policy("3600", "0"))
+        self.assertEqual(got["deadman_s"], 3600)
+        self.assertEqual(got["silence_s"], 0)
+
+    def test_zero_disarms(self):
+        rns_bridge.set_wipe_policy(3600, 3600)
+        got = json.loads(rns_bridge.set_wipe_policy(0, 0))
+        self.assertEqual((got["deadman_s"], got["silence_s"]), (0, 0))
+
+    def test_a_disarmed_policy_then_erases_nothing(self):
+        self.write_secrets()
+        rns_bridge.set_wipe_policy(60, 60)
+        rns_bridge.set_wipe_policy(0, 0)
+        for _ in range(50):
+            self.clock.pass_time(3600)
+            self.assertEqual(self.tick(), {"erased": False})
+        self.assertTrue(self.all_present())
+
+    def test_a_negative_duration_is_off_not_instantly_due(self):
+        got = json.loads(rns_bridge.set_wipe_policy(-5, -1))
+        self.assertEqual((got["deadman_s"], got["silence_s"]), (0, 0))
+        self.write_secrets()
+        self.clock.pass_time(86400)
+        self.assertEqual(self.tick(), {"erased": False})
+        self.assertTrue(self.all_present())
+
+    def test_junk_arguments_never_raise(self):
+        for bad in (None, "", "abc", [], {}, object()):
+            got = json.loads(rns_bridge.set_wipe_policy(bad, bad))
+            self.assertIn("deadman_s", got)
+
+    def test_arming_either_timer_restarts_BOTH_countdowns(self):
+        # Documents real behaviour rather than endorsing it: set_wipe_policy
+        # zeroes both counters on every call, so changing the silence window
+        # silently grants the deadman a fresh full countdown. An operator who
+        # adjusts one timer 23 hours into a 24-hour deadman gets another 24.
+        rns_bridge.set_wipe_policy(86400, 0)
+        self.clock.pass_time(82800)
+        self.tick()
+        self.assertGreater(self.policy()["deadman_elapsed_s"], 0)
+        rns_bridge.set_wipe_policy(86400, 600)
+        self.assertEqual(self.policy()["deadman_elapsed_s"], 0)
+
+
+class TestTheDeadmanTimer(_AutoEraseBase):
+    """Erase this long after arming, heard from or not."""
+
+    def test_before_the_window_is_up_nothing_is_erased(self):
+        self.write_secrets()
+        rns_bridge.set_wipe_policy(3600, 0)
+        for _ in range(100):
+            self.clock.pass_time(30)
+            self.assertEqual(self.tick(), {"erased": False})
+        self.assertTrue(self.all_present())
+
+    def test_past_the_window_everything_is_erased(self):
+        self.write_secrets()
+        rns_bridge.set_wipe_policy(600, 0)
+        self.clock.pass_time(601)
+        self.assertEqual(self.tick(), {"erased": True})
+        self.assertEqual(self.survivors(), [])
+
+    def test_the_boundary_tick_fires(self):
+        self.write_secrets()
+        rns_bridge.set_wipe_policy(600, 0)
+        self.clock.pass_time(600)
+        self.assertEqual(self.tick(), {"erased": True})
+
+    def test_it_adds_up_over_many_short_ticks(self):
+        # The service charges ~10 s at a time; the counter has to accumulate
+        # rather than needing one tick that spans the whole window.
+        self.write_secrets()
+        rns_bridge.set_wipe_policy(600, 0)
+        fired = False
+        for _ in range(100):
+            self.clock.pass_time(10)
+            if self.tick()["erased"]:
+                fired = True
+                break
+        self.assertTrue(fired)
+        self.assertEqual(self.survivors(), [])
+
+    def test_the_counter_survives_a_process_restart(self):
+        self.write_secrets()
+        rns_bridge.set_wipe_policy(600, 0)
+        self.clock.pass_time(590)
+        self.assertEqual(self.tick(), {"erased": False})
+        self.restart_the_process()
+        self.clock.pass_time(20)
+        self.assertEqual(self.tick(), {"erased": True})
+
+
+class TestTheSilenceTimer(_AutoEraseBase):
+    """Erase this long after the last peer was heard."""
+
+    def test_a_peer_heard_recently_defers_the_wipe(self):
+        self.write_secrets()
+        rns_bridge.set_wipe_policy(0, 600)
+        for _ in range(20):
+            self.clock.pass_time(300)
+            self.hear_a_peer()
+            self.assertEqual(self.tick(), {"erased": False})
+        self.assertTrue(self.all_present())
+
+    def test_silence_longer_than_the_window_erases_everything(self):
+        self.write_secrets()
+        rns_bridge.set_wipe_policy(0, 600)
+        self.clock.pass_time(601)
+        self.assertEqual(self.tick(), {"erased": True})
+        self.assertEqual(self.survivors(), [])
+
+    def test_armed_and_never_spoken_to_it_still_fires(self):
+        # The case a hand-written policy file cannot test: arming must start
+        # the silence window, or a phone that never hears anybody counts from
+        # nothing and never comes due. Mutation-checked.
+        self.write_secrets()
+        rns_bridge.set_wipe_policy(0, 600)
+        self.assertEqual(self.tick(), {"erased": False})
+        self.clock.pass_time(601)
+        self.assertEqual(self.tick(), {"erased": True})
+
+    def test_hearing_a_peer_resets_the_window(self):
+        self.write_secrets()
+        rns_bridge.set_wipe_policy(0, 600)
+        self.clock.pass_time(500)
+        self.hear_a_peer()
+        self.clock.pass_time(500)          # 1000 s armed, 500 s since heard
+        self.assertEqual(self.tick(), {"erased": False})
+        self.clock.pass_time(101)          # 601 s since the sighting
+        self.assertEqual(self.tick(), {"erased": True})
+
+    def test_the_sighting_is_recorded_by_note_peer_frame_itself(self):
+        # The whole chain: _note_peer_frame (every authenticated sighting) is
+        # what records it, and wipe_tick measures from there. A break anywhere
+        # in it is silent -- the phone would erase itself with the team still
+        # talking to it -- so this drives the real function rather than setting
+        # the global by hand.
+        rns_bridge.set_wipe_policy(0, 600)
+        self.assertIsNotNone(rns_bridge._wipe_heard_mono)
+        rns_bridge._wipe_heard_mono = None
+        self.hear_a_peer()
+        self.assertIsNotNone(rns_bridge._wipe_heard_mono)
+        self.assertGreater(rns_bridge._wipe_last_heard, 0)
+
+    def test_across_a_restart_the_window_carries_on_from_the_file(self):
+        # Nothing heard in the new process, so the counter the last one wrote
+        # is what the window continues from -- it does not start again.
+        self.write_secrets()
+        rns_bridge.set_wipe_policy(0, 600)
+        self.clock.pass_time(590)
+        self.assertEqual(self.tick(), {"erased": False})
+        self.restart_the_process()
+        self.clock.pass_time(20)
+        self.assertEqual(self.tick(), {"erased": True})
+
+    def test_the_deadman_fires_even_while_peers_are_heard(self):
+        # The two timers are independent: a phone in constant contact still
+        # erases when its deadman window is up.
+        self.write_secrets()
+        rns_bridge.set_wipe_policy(600, 86400)
+        for _ in range(100):
+            self.clock.pass_time(10)
+            self.hear_a_peer()
+            if self.tick()["erased"]:
+                break
+        self.assertEqual(self.survivors(), [])
+
+    def test_with_both_armed_the_silence_timer_still_fires(self):
+        # Both timers on is the configuration an operator would actually pick
+        # ("erase after a day, or after an hour of silence"), and it is the
+        # only arrangement in which the silence branch can be shadowed by the
+        # deadman one. Mutation-checked: gating the silence check on
+        # `not deadman_s` passes every other test in this file.
+        self.write_secrets()
+        rns_bridge.set_wipe_policy(86400, 600)
+        self.clock.pass_time(601)
+        self.assertEqual(self.tick(), {"erased": True})
+        self.assertEqual(self.survivors(), [])
+
+
+class TestTheClockCannotBeUsedToPostponeAWipe(_AutoEraseBase):
+    """The 2026-11-12 fix, and the reason the feature exists at all.
+
+    Whoever is holding a phone they should not have can reach the date setting
+    -- it is not behind the screen lock once the phone is unlocked, and on a
+    phone taken while unlocked nothing is. The first implementation stored a
+    wall-clock deadline, so setting the date back a year bought a year.
+    """
+
+    def test_setting_the_date_back_does_not_postpone_the_wipe(self):
+        self.write_secrets()
+        rns_bridge.set_wipe_policy(600, 0)
+        self.clock.pass_time(300)
+        self.assertEqual(self.tick(), {"erased": False})
+        self.clock.set_date_back(365 * 86400)
+        self.assertEqual(self.tick(), {"erased": False})   # not yet due
+        self.clock.pass_time(301)                          # real time passing
+        self.assertEqual(self.tick(), {"erased": True})
+        self.assertEqual(self.survivors(), [])
+
+    def test_winding_the_date_back_every_tick_does_not_help_either(self):
+        # The patient version of the same attack: a little each tick, so no
+        # single jump looks anomalous.
+        self.write_secrets()
+        rns_bridge.set_wipe_policy(600, 0)
+        fired = False
+        for _ in range(200):
+            self.clock.pass_time(10)
+            self.clock.set_date_back(60)
+            if self.tick()["erased"]:
+                fired = True
+                break
+        self.assertTrue(fired, "a receding date held the wipe off for good")
+        self.assertEqual(self.survivors(), [])
+
+    def test_a_frozen_date_does_not_help(self):
+        # Wall clock stopped entirely (or the file's stamp never advancing):
+        # the monotonic term carries the countdown on its own.
+        self.write_secrets()
+        rns_bridge.set_wipe_policy(600, 0)
+        for _ in range(100):
+            self.clock.mono += 10          # time passes; the date does not
+            if self.tick()["erased"]:
+                break
+        self.assertEqual(self.survivors(), [])
+
+    def test_the_silence_window_is_equally_unmovable(self):
+        self.write_secrets()
+        rns_bridge.set_wipe_policy(0, 600)
+        self.clock.pass_time(300)
+        self.assertEqual(self.tick(), {"erased": False})
+        self.clock.set_date_back(365 * 86400)
+        self.clock.pass_time(301)
+        self.assertEqual(self.tick(), {"erased": True})
+
+    def test_time_spent_powered_off_still_counts(self):
+        # The other half of the fix: BOOTTIME restarts from zero at boot, so
+        # monotonic cannot see the gap at all and the wall clock is the only
+        # witness. Without that term, switching the phone off would pause the
+        # countdown for as long as you liked.
+        self.write_secrets()
+        rns_bridge.set_wipe_policy(600, 0)
+        self.assertEqual(self.tick(), {"erased": False})
+        self.restart_the_process()
+        self.clock.power_off_for(3600)
+        self.assertEqual(self.tick(), {"erased": True})
+        self.assertEqual(self.survivors(), [])
+
+    def test_a_date_jumped_forward_fires_early_on_purpose(self):
+        # Documents the deliberate choice in _wipe_charge's max(): when the
+        # two clocks disagree, the LARGER elapsed wins, so a timezone or NTP
+        # correction can bring a wipe forward. For a feature that destroys
+        # keys on a phone presumed lost, early is the safe direction -- but it
+        # does mean a wrong date can cost a working phone its keys.
+        self.write_secrets()
+        rns_bridge.set_wipe_policy(86400, 0)
+        self.assertEqual(self.tick(), {"erased": False})
+        self.clock.set_date_forward(86401)
+        self.assertEqual(self.tick(), {"erased": True})
+
+    def test_reading_the_status_screen_neither_delays_nor_hastens_a_wipe(self):
+        # _wipe_status runs on every get_status() -- far more often than the
+        # tick -- and must not consume the interval the tick needs to charge,
+        # nor charge it twice.
+        self.write_secrets()
+        rns_bridge.set_wipe_policy(600, 0)
+        self.clock.pass_time(300)
+        for _ in range(50):
+            rns_bridge._wipe_status()
+        self.assertEqual(self.tick(), {"erased": False})
+        self.assertEqual(self.policy()["deadman_elapsed_s"], 300)
+        self.clock.pass_time(299)
+        for _ in range(50):
+            rns_bridge._wipe_status()
+        self.assertEqual(self.tick(), {"erased": False})
+        self.clock.pass_time(1)
+        self.assertEqual(self.tick(), {"erased": True})
+
+    def test_the_monotonic_source_prefers_boottime(self):
+        # CLOCK_MONOTONIC stops during suspend and an Android phone is
+        # suspended almost all of the time, so reading it instead would stall
+        # the countdown on a phone sitting in a drawer -- the exact case this
+        # feature is for. Pinned because the fallback hides the difference.
+        asked = []
+
+        class OnlyBoottime(_FakeClock):
+            def clock_gettime(self, which):
+                asked.append(which)
+                return _FakeClock.clock_gettime(self, which)
+
+            def monotonic(self):
+                raise AssertionError("read CLOCK_MONOTONIC, not BOOTTIME")
+
+        rns_bridge.time = OnlyBoottime()
+        self.assertGreater(rns_bridge._wipe_mono(), 0)
+        self.assertEqual(asked, [_FakeClock.CLOCK_BOOTTIME])
+
+    def test_it_falls_back_when_boottime_is_missing(self):
+        class NoBoottime(_FakeClock):
+            def clock_gettime(self, which):
+                raise OSError("no such clock")
+
+        rns_bridge.time = NoBoottime(mono=1234.0)
+        self.assertEqual(rns_bridge._wipe_mono(), 1234.0)
+
+    def test_it_survives_a_time_module_with_neither_clock(self):
+        class NoClocks(_FakeClock):
+            def clock_gettime(self, which):
+                raise AttributeError("gone")
+
+            def monotonic(self):
+                raise OSError("gone too")
+
+        rns_bridge.time = NoClocks()
+        self.assertEqual(rns_bridge._wipe_mono(), 0.0)
+        # And with no monotonic clock at all the wall term still runs the
+        # countdown, so the feature degrades rather than switching itself off.
+        self.write_secrets()
+        rns_bridge.set_wipe_policy(600, 0)
+        rns_bridge.time.pass_time(601)
+        self.assertEqual(self.tick(), {"erased": True})
+
+
+class TestTheWipeItself(_AutoEraseBase):
+
+    def test_every_file_in_the_list_goes_and_nothing_of_it_is_left(self):
+        self.write_secrets()
+        rns_bridge.erase_all_settings()
+        self.assertEqual(self.survivors(), [])
+        # Belt and braces: no file anywhere under the temp dir still holds the
+        # marker, which catches a wipe that renamed rather than removed.
+        left = []
+        for root, _dirs, files in os.walk(self.dir):
+            for name in files:
+                with open(os.path.join(root, name)) as f:
+                    if self.SECRET in f.read():
+                        left.append(name)
+        self.assertEqual(left, [])
+
+    def test_the_in_memory_secrets_go_too(self):
+        rns_bridge._mesh = object()
+        rns_bridge._mesh_passphrase = "squad passphrase"
+        rns_bridge._fingerprint_cache = "0f0f"
+        rns_bridge._radio_config = {"freq": 915.1}
+        rns_bridge.erase_all_settings()
+        self.assertIsNone(rns_bridge._mesh)
+        self.assertEqual(rns_bridge._mesh_passphrase, "")
+        self.assertIsNone(rns_bridge._fingerprint_cache)
+        self.assertIsNone(rns_bridge._radio_config)
+
+    def test_the_node_id_is_replaced_not_merely_dropped(self):
+        # The old id may have been recorded off the air, so coming back under
+        # it would re-identify the phone.
+        rns_bridge._NODE_ID = "a1b2c3"
+        rns_bridge.erase_all_settings()
+        self.assertNotEqual(rns_bridge._NODE_ID, "a1b2c3")
+        self.assertEqual(len(rns_bridge._NODE_ID), 6)
+        int(rns_bridge._NODE_ID, 16)
+
+    def test_the_peer_table_is_cleared(self):
+        self.hear_a_peer()
+        self.assertGreater(len(rns_bridge._peers), 0)
+        rns_bridge.erase_all_settings()
+        self.assertEqual(len(rns_bridge._peers), 0)
+
+    def test_the_last_sighting_goes_with_it(self):
+        # A sighting of a peer from the group just wiped must not be what the
+        # next silence window measures from.
+        self.hear_a_peer()
+        rns_bridge.erase_all_settings()
+        self.assertIsNone(rns_bridge._wipe_heard_mono)
+        self.assertEqual(rns_bridge._wipe_last_heard, 0.0)
+
+    def test_files_that_are_already_gone_are_not_an_error(self):
+        # Half the files absent is the normal case (a phone that never hosted
+        # settings sharing has no host key), and a wipe that raised part-way
+        # would leave the rest of the secrets in place.
+        with open(self.secret_paths[0], "w") as f:
+            f.write(self.SECRET)
+        self.assertEqual(json.loads(rns_bridge.erase_all_settings()),
+                         {"erased": True})
+        self.assertEqual(self.survivors(), [])
+
+    def test_a_wipe_of_nothing_at_all_still_succeeds(self):
+        self.assertEqual(json.loads(rns_bridge.erase_all_settings()),
+                         {"erased": True})
+
+    def test_it_disarms_itself_and_does_not_report_a_second_wipe(self):
+        # The policy file is itself in _WIPE_FILES, so the wipe takes the
+        # timers with it. That matters twice: Kotlin's wipeCheck reacts to
+        # {"erased": true} by clearing preferences and raising a notification,
+        # and a tick that kept answering true would do that every 10 s forever.
+        self.write_secrets()
+        rns_bridge.set_wipe_policy(600, 0)
+        self.clock.pass_time(601)
+        self.assertEqual(self.tick(), {"erased": True})
+        self.assertFalse(os.path.exists(rns_bridge._WIPE_PATH))
+        for _ in range(20):
+            self.clock.pass_time(600)
+            self.assertEqual(self.tick(), {"erased": False})
+        self.assertEqual(self.policy()["deadman_s"], 0)
+
+
+class TestWipeStatus(_AutoEraseBase):
+    """What the status screen reads (get_status()["wipe"])."""
+
+    def test_both_timers_off_reads_none(self):
+        self.assertEqual(rns_bridge._wipe_status(),
+                         {"deadman_in_s": None, "silence_in_s": None})
+
+    def test_it_counts_down(self):
+        rns_bridge.set_wipe_policy(600, 300)
+        self.assertEqual(rns_bridge._wipe_status(),
+                         {"deadman_in_s": 600, "silence_in_s": 300})
+        self.clock.pass_time(100)
+        self.assertEqual(rns_bridge._wipe_status(),
+                         {"deadman_in_s": 500, "silence_in_s": 200})
+
+    def test_an_overdue_timer_reads_zero_not_a_negative(self):
+        rns_bridge.set_wipe_policy(60, 60)
+        self.clock.pass_time(600)
+        got = rns_bridge._wipe_status()
+        self.assertEqual(got["deadman_in_s"], 0)
+        self.assertEqual(got["silence_in_s"], 0)
+
+    def test_hearing_a_peer_puts_the_silence_countdown_back_up(self):
+        rns_bridge.set_wipe_policy(0, 600)
+        self.clock.pass_time(500)
+        self.assertAlmostEqual(rns_bridge._wipe_status()["silence_in_s"],
+                               100, delta=1)
+        self.hear_a_peer()
+        self.assertAlmostEqual(rns_bridge._wipe_status()["silence_in_s"],
+                               600, delta=1)
+
+    def test_a_date_change_does_not_move_the_countdown(self):
+        rns_bridge.set_wipe_policy(600, 0)
+        self.clock.pass_time(300)
+        self.assertAlmostEqual(rns_bridge._wipe_status()["deadman_in_s"],
+                               300, delta=1)
+        self.clock.set_date_back(365 * 86400)
+        self.assertAlmostEqual(rns_bridge._wipe_status()["deadman_in_s"],
+                               300, delta=1)
+
+    def test_it_never_raises_on_a_junk_policy(self):
+        self.write_raw_policy("{{{")
+        self.assertEqual(rns_bridge._wipe_status(),
+                         {"deadman_in_s": None, "silence_in_s": None})
+
+    def test_the_status_block_carries_it(self):
+        self.assertIn("wipe", inspect.getsource(rns_bridge.get_status))
+
+
+class TestThePolicyParserContract(_AutoEraseBase):
+    """_wipe_policy promises a dict. wipe_tick's blanket except would turn a
+    broken promise into a silent "nothing is due" -- same outcome, no clue --
+    so the parser is pinned directly rather than only through its callers."""
+
+    def test_it_returns_a_dict_for_every_shape_of_junk(self):
+        for raw in ('[1,2]', '"text"', '3', 'null', 'true', '{', ''):
+            self.write_raw_policy(raw)
+            got = rns_bridge._wipe_policy()
+            self.assertIsInstance(got, dict, "policy %r gave %r" % (raw, got))
+
+    def test_it_returns_what_was_written_for_a_real_object(self):
+        self.write_policy(deadman_s=42)
+        self.assertEqual(rns_bridge._wipe_policy().get("deadman_s"), 42)
+
+    def test_a_missing_file_is_an_empty_policy(self):
+        self.assertEqual(rns_bridge._wipe_policy(), {})
+
+    def test_an_unreadable_elapsed_counter_reads_as_zero_not_as_overdue(self):
+        for bad in ("abc", None, [], {}, "nan"):
+            self.write_policy(deadman_s=600, deadman_elapsed_s=bad)
+            self.assertEqual(rns_bridge._wipe_elapsed(
+                rns_bridge._wipe_policy(), "deadman_elapsed_s"), 0.0)
+
+    def test_a_negative_elapsed_counter_reads_as_zero(self):
+        self.write_policy(deadman_s=600, deadman_elapsed_s=-10 ** 9)
+        self.assertEqual(rns_bridge._wipe_elapsed(
+            rns_bridge._wipe_policy(), "deadman_elapsed_s"), 0.0)
+
+
+class TestTheWipeListIsAnEnforcedInventory(unittest.TestCase):
+    """_WIPE_FILES is hand-written: eight literal expanduser() calls, four of
+    them duplicating paths that belong to settings_link and one to mesh. Every
+    way that list can be wrong is silent -- os.remove's failure is swallowed,
+    so a renamed or forgotten file is simply left on the phone.
+
+    These tests read the real module globals (the classes above restore them in
+    tearDown), so they are about production's list, not a fixture's.
+    """
+
+    # Paths rns_bridge owns that a wipe deliberately does NOT take, each with
+    # the reason. Shrinking this set is the fix; growing it needs a reason
+    # written here. The test asserts the set EXACTLY, so adding a path to
+    # _WIPE_FILES without removing it here fails just as loudly as forgetting
+    # one.
+    DELIBERATELY_KEPT = {
+        # A single boolean: whether the radio's own screen shows app status.
+        # No secret, and no group membership can be inferred from it.
+        "_RADIO_DISPLAY_PATH",
+    }
+
+    # Paths that SHOULD be wiped and are not. Empty since 2026-11-12, when the
+    # two entries that were here -- the CoT dump and the deafness fixture --
+    # were added to _WIPE_FILES along with the FM receive dump and its marker.
+    # Anything added back needs its reason written beside it.
+    KNOWN_GAPS = set()
+
+    def wipe_files(self):
+        return set(rns_bridge._WIPE_FILES)
+
+    def test_every_path_global_is_wiped_or_listed_with_a_reason(self):
+        unaccounted = {}
+        for name, value in sorted(vars(rns_bridge).items()):
+            if not name.endswith("_PATH") or not isinstance(value, str):
+                continue
+            if value in self.wipe_files():
+                continue
+            if name in self.DELIBERATELY_KEPT or name in self.KNOWN_GAPS:
+                continue
+            unaccounted[name] = value
+        self.assertEqual(unaccounted, {},
+                         "a path rns_bridge stores is neither wiped nor "
+                         "accounted for in this test -- decide which it is")
+
+    def test_the_accounted_for_paths_are_really_not_wiped(self):
+        # Keeps the two sets above honest: if a gap gets fixed in _WIPE_FILES,
+        # this fails and tells you to delete the entry.
+        for name in self.DELIBERATELY_KEPT | self.KNOWN_GAPS:
+            self.assertNotIn(getattr(rns_bridge, name), self.wipe_files(),
+                             "%s is wiped now -- remove it from this test's "
+                             "DELIBERATELY_KEPT/KNOWN_GAPS" % name)
+
+    def test_the_bench_fixtures_and_the_fm_dump_are_in_the_list(self):
+        # All four are debug-only and usually absent. That is not a reason to
+        # leave them: the CoT dump is plaintext positions, callsigns and ATAK
+        # uids, and the FM dump is raw received audio -- 519 KB of it was found
+        # on a bench phone three weeks after it was recorded.
+        #
+        # The FM pair is written by KOTLIN into the same directory. rns_bridge
+        # names those two paths for no other purpose than this, because the
+        # loop above can only see what Python stores: anything the Kotlin side
+        # drops in filesDir is invisible to it otherwise.
+        for name in ("_COT_DUMP_PATH", "_DEAF_TO_PATH",
+                     "_FM_RX_DUMP_PATH", "_FM_RX_DUMP_MARKER_PATH"):
+            self.assertIn(getattr(rns_bridge, name), self.wipe_files(), name)
+
+    def test_the_secrets_that_must_go_are_in_the_list(self):
+        for name in ("_MESH_PASSPHRASE_PATH", "_NODE_ID_PATH",
+                     "_RADIO_CONFIG_PATH", "_WIPE_PATH"):
+            self.assertIn(getattr(rns_bridge, name), self.wipe_files(), name)
+
+    def test_the_settings_sharing_paths_match_settings_links_own(self):
+        # _WIPE_FILES hardcodes these four rather than importing them, so a
+        # rename in settings_link would leave the PIN, the trusted-host list
+        # and the host key on a wiped phone.
+        import settings_link
+        for name in ("_RECEIVER_PATH", "_HOST_KEY_PATH", "_HOST_REV_PATH",
+                     "_NET_PATH"):
+            self.assertIn(getattr(settings_link, name), self.wipe_files(),
+                          "settings_link.%s is not in rns_bridge._WIPE_FILES" % name)
+
+    def test_the_epoch_path_matches_meshs_own(self):
+        # Same hardcoding, and this one is load-bearing for the nonce fixes:
+        # leaving the counter file behind under a wiped key is harmless, but a
+        # rename here means the counter survives a wipe that was meant to be
+        # total.
+        self.assertIn(mesh._EPOCH_PATH, self.wipe_files())
+
+    def test_the_policy_file_is_wiped_last(self):
+        # Order matters: the policy file is what disarms the feature, so it
+        # going first would leave the timers armed if a later remove raised
+        # (it cannot today -- each is in its own try -- but the ordering is
+        # free insurance and the test pins the intent).
+        self.assertEqual(rns_bridge._WIPE_FILES[-1], rns_bridge._WIPE_PATH)
+
+
+class TestTheWipeTakesTheReticulumIdentity(_AutoEraseBase):
+    """~/.reticulum is a DIRECTORY, so it cannot be one more entry in
+    _WIPE_FILES, and for two milestones it was simply left behind.
+
+    What is in it is not configuration: Reticulum keeps its Transport Identity
+    there, a long-term private key reloaded at every start ("Loaded Transport
+    Identity from storage"). A phone that erased its group key but kept that is
+    still carrying an identity it can be recognised by, which is most of what
+    the wipe exists to prevent.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.reticulum = os.path.join(self.dir, "reticulum")
+        os.makedirs(os.path.join(self.reticulum, "storage"))
+        self.identity = os.path.join(self.reticulum, "storage", "identity")
+        with open(self.identity, "w") as f:
+            f.write(self.SECRET)
+        self.saved_config_dir = rns_bridge.RNS_CONFIG_DIR
+        rns_bridge.RNS_CONFIG_DIR = self.reticulum
+
+    def tearDown(self):
+        rns_bridge.RNS_CONFIG_DIR = self.saved_config_dir
+        super().tearDown()
+
+    def test_the_identity_goes_with_the_keys(self):
+        self.write_secrets()
+        self.assertTrue(self.all_present())
+        rns_bridge._erase_all_settings()
+        self.assertEqual(self.survivors(), [])
+        self.assertFalse(
+            os.path.exists(self.identity),
+            "the Reticulum Transport Identity -- a long-term private key -- "
+            "survived a wipe")
+        self.assertFalse(os.path.exists(self.reticulum),
+                         "the whole Reticulum directory should go, not just "
+                         "the file this test happens to name")
+
+    def test_a_missing_reticulum_directory_is_not_an_error(self):
+        # The usual case on a desktop, and the case on a phone whose bridge
+        # never started. A wipe that raised here would leave the secrets that
+        # come after it in _erase_all_settings untouched.
+        shutil.rmtree(self.reticulum)
+        self.write_secrets()
+        rns_bridge._erase_all_settings()
+        self.assertEqual(self.survivors(), [])
+
+    def test_the_wipe_does_not_reach_outside_the_configured_directory(self):
+        # rmtree is the most destructive call in this module, so what it is
+        # pointed at is worth pinning: a sibling of the Reticulum directory
+        # must survive.
+        bystander = os.path.join(self.dir, "not-reticulum")
+        os.makedirs(bystander)
+        with open(os.path.join(bystander, "keep"), "w") as f:
+            f.write("keep me")
+        self.write_secrets()
+        rns_bridge._erase_all_settings()
+        self.assertTrue(os.path.exists(os.path.join(bystander, "keep")))
