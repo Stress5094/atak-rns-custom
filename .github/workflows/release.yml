@@ -90,9 +90,17 @@ jobs:
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "cmake;4.1.2" "ndk;28.2.13676358" > /dev/null
           tools/build_libcodec2_android.sh
 
-      - name: Write the keystore out of the secret
+      # Decode the keystore AND check the password and alias actually work,
+      # before spending three minutes on a build that can only fail. Gradle's
+      # own message for a bad password arrives at the end of packageRelease
+      # and reads "Failed to read key *** from store", which does not say
+      # which of the two password secrets was wrong.
+      - name: Write the keystore out of the secret and check it opens
         env:
           KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
         run: |
           set -euo pipefail
           if [ -z "${KEYSTORE_BASE64:-}" ]; then
@@ -102,6 +110,33 @@ jobs:
           fi
           printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
           test -s "$RUNNER_TEMP/release.jks"
+
+          listing="$RUNNER_TEMP/keystore-listing.txt"
+          if ! keytool -list -keystore "$RUNNER_TEMP/release.jks" \
+                 -storepass "$KEYSTORE_PASSWORD" > "$listing" 2>&1; then
+            echo "The keystore decoded, but RELEASE_KEYSTORE_PASSWORD does not open it." >&2
+            echo "Check the secret for a stray space or a trailing newline, and" >&2
+            echo "confirm it locally with:  keytool -list -keystore your.jks" >&2
+            exit 1
+          fi
+
+          # Alias names are not secret, so a mismatch can say what IS in there.
+          if ! grep -q "^${KEY_ALIAS}," "$listing"; then
+            echo "RELEASE_KEY_ALIAS is '${KEY_ALIAS}', which is not in this keystore." >&2
+            echo "The keystore contains:" >&2
+            grep -E "PrivateKeyEntry|trustedCertEntry" "$listing" | cut -d, -f1 | sed 's/^/  /' >&2
+            exit 1
+          fi
+
+          # A PKCS12 keystore has ONE password, so these two secrets must be
+          # identical. Compared without printing either.
+          if [ "$KEYSTORE_PASSWORD" != "$KEY_PASSWORD" ]; then
+            echo "RELEASE_KEY_PASSWORD differs from RELEASE_KEYSTORE_PASSWORD." >&2
+            echo "A PKCS12 keystore cannot have a separate key password, so both" >&2
+            echo "secrets must hold the same value. See docs/RELEASING.md." >&2
+            exit 1
+          fi
+          echo "Keystore opens, alias '${KEY_ALIAS}' found, passwords agree."
 
       - name: Assemble the signed release APK
         env:
