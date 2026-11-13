@@ -1,0 +1,146 @@
+# Publishes a signed APK when a version tag is pushed.
+#
+#     git tag v1.1 && git push origin v1.1
+#
+# Ordinary pushes are unaffected: they keep running the suite and keeping a
+# debug APK as a workflow artifact. This runs only on a tag, so a release is
+# something you decide to make rather than something that happens.
+#
+# The signing key never exists in the repository. It is held as a GitHub
+# secret, written to the runner's temporary directory for the length of one
+# build, and deleted again. See docs/RELEASING.md for how to create it.
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# gh release create writes to the repository.
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  # Deliberately NOT cancel-in-progress: a half-published release is worse
+  # than a duplicate run.
+  cancel-in-progress: false
+
+jobs:
+  # The same job every push gets, not a copy of it. A tag whose suite fails
+  # never reaches the publish job below.
+  verify:
+    uses: ./.github/workflows/tests.yml
+
+  publish:
+    name: Build, sign and publish
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      # Full history: app/build.gradle.kts stamps the build from git, and a
+      # shallow clone gives it nothing to read.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # versionCode has to be an integer that only ever grows, or a phone will
+      # not treat a new build as an upgrade. major*10000 + minor*100 + patch
+      # keeps the ordering right up to 99 for minor and patch, and refuses a
+      # tag it cannot turn into one rather than publishing a version that
+      # silently sorts below its predecessor.
+      - name: Work out the version from the tag
+        id: version
+        run: |
+          set -euo pipefail
+          name="${GITHUB_REF_NAME#v}"
+          code=$(TAG_NAME="$name" REF="$GITHUB_REF_NAME" python3 - <<'PY'
+          import os, re, sys
+          name, ref = os.environ["TAG_NAME"], os.environ["REF"]
+          m = re.fullmatch(r"(\d+)\.(\d+)(?:\.(\d+))?", name)
+          if not m:
+              sys.exit(f"tag must look like v1.2 or v1.2.3, got {ref!r}")
+          major, minor, patch = (int(x or 0) for x in m.groups())
+          if minor > 99 or patch > 99:
+              sys.exit("minor and patch must each be below 100")
+          print(major * 10000 + minor * 100 + patch)
+          PY
+          )
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "Publishing $GITHUB_REF_NAME as versionName=$name versionCode=$code"
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install uv and the build-time Python
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          uv python install 3.9
+
+      # Same as the debug build: the phone needs its own arm64 codec2 or FM
+      # silently cannot start.
+      - name: Build libcodec2 for the phone
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "cmake;4.1.2" "ndk;28.2.13676358" > /dev/null
+          tools/build_libcodec2_android.sh
+
+      - name: Write the keystore out of the secret
+        env:
+          KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_BASE64:-}" ]; then
+            echo "RELEASE_KEYSTORE_BASE64 is not set." >&2
+            echo "See docs/RELEASING.md -- four secrets are needed." >&2
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          test -s "$RUNNER_TEMP/release.jks"
+
+      - name: Assemble the signed release APK
+        env:
+          RTAK_KEYSTORE_FILE: ${{ runner.temp }}/release.jks
+          RTAK_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          RTAK_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RTAK_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+          RTAK_VERSION_NAME: ${{ steps.version.outputs.name }}
+          RTAK_VERSION_CODE: ${{ steps.version.outputs.code }}
+        run: ./gradlew :app:assembleRelease -PbuildPython="$(uv python find 3.9)"
+
+      # The failure this guards against is quiet: with any signing variable
+      # missing, Gradle happily produces app-release-UNSIGNED.apk, which looks
+      # like a successful build and cannot be installed by anyone.
+      - name: Check it really is signed
+        run: |
+          set -euo pipefail
+          apk=app/build/outputs/apk/release/app-release.apk
+          if [ ! -f "$apk" ]; then
+            echo "No signed APK. Gradle produced:" >&2
+            ls -la app/build/outputs/apk/release/ >&2
+            echo "An -unsigned.apk here means the signing secrets did not reach Gradle." >&2
+            exit 1
+          fi
+          apksigner=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$apksigner" verify --print-certs "$apk"
+
+      - name: Remove the keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks"
+
+      # gh is preinstalled on the runner, so this needs no third-party action
+      # in a workflow that handles a signing key.
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "$GITHUB_REF_NAME" \
+            "app/build/outputs/apk/release/app-release.apk#RTAK ${GITHUB_REF_NAME} (arm64)" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes

@@ -12,6 +12,13 @@ __pycache__/
 
 *.wav
 
+# Signing keys. The release key lives in a GitHub secret and on the owner's
+# own backup, never here -- see docs/RELEASING.md. These patterns exist so a
+# keystore left in the working directory cannot be committed by accident.
+*.jks
+*.keystore
+keystore.properties
+
 # Built by tools/build_libcodec2_android.sh: a compiled binary tied to one
 # NDK/ABI, reproducible from source in a few minutes.
 app/src/main/jniLibs/

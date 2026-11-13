@@ -11,6 +11,9 @@ name: tests
 on:
   push:
   pull_request:
+  # So the release workflow can run exactly this, rather than a second copy of
+  # it that drifts. A tag that cannot pass the suite does not get published.
+  workflow_call:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
