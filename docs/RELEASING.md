@@ -37,11 +37,12 @@ keytool -genkeypair -v \
   -dname "CN=rtak"
 ```
 
-`-dname` sets the certificate's name outright and skips the questions. It is
-worth passing: answering those prompts interactively and pressing return
-through them produces a certificate reading
-`CN=…, OU=Unknown, O=Unknown, L=Unknown, ST=Unknown, C=Unknown`, and that name
-is embedded in every APK you publish for anyone to read.
+`-dname` sets the certificate's name outright and skips the questions. The
+name is free text and is not checked by anything — use whatever you want this
+project's certificate to say. It is worth passing explicitly: answering those
+prompts interactively and pressing return through them produces a certificate
+reading `CN=…, OU=Unknown, O=Unknown, L=Unknown, ST=Unknown, C=Unknown`, and
+that name is embedded in every APK you publish for anyone to read.
 
 **The name cannot be changed later.** Android identifies an app by its signing
 certificate, so re-issuing the certificate under a different name is as
